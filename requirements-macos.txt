@@ -1,0 +1,13 @@
+# AT小PP · macOS 运行/打包依赖
+# 与 Windows requirements.txt 的差异：去掉仅 Windows 可用的 comtypes；
+# 新增 audioop-lts（Python 3.13 已移除标准库 audioop，voice 模块依赖它）。
+PyQt6==6.7.1  # 锁 6.7.x：PyQt6 6.8/6.9（Qt 6.8+）在 macOS 上因 qdarwinpermission 全局静态初始化器调用 CFBundleCopyBundleURL 拿到 NULL，import 期即 SIGSEGV；6.7.x 无此 TU
+pycryptodome>=3.20
+opencc-python-reimplemented>=0.1.7
+pypinyin>=0.50
+audioop-lts>=0.2
+certifi>=2024.0  # macOS 冻结包无系统 CA 路径，https（酷我搜索等）需显式指定证书包
+# macOS 音乐播放后端：系统原生 AVFoundation（AVAudioPlayer），绕过 QtMultimedia 打包后无声问题。
+# 仅需 AVFoundation 这个 PyObjC 桥接包（会自动拉入 pyobjc-core + pyobjc-framework-Foundation）。
+pyobjc-framework-AVFoundation>=11.0
+PyInstaller>=6.0

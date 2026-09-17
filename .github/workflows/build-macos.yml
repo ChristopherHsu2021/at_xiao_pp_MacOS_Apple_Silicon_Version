@@ -1,0 +1,50 @@
+name: Build macOS .dmg
+
+# 触发方式：
+#   1. 手动：仓库 Actions → Build macOS .dmg → Run workflow
+#   2. 推送 main 或打 v* tag 自动触发
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+jobs:
+  build-macos:
+    # 纯血 Apple Silicon 原生构建（arm64）。
+    # macos-15 runner 本身就是 Apple Silicon (arm64)，setup-python 装到的也是原生 arm64 Python，
+    # 所以这里**刻意不加 arch -x86_64 包裹**：不加即产出 arm64 原生包，M 系列直接原生运行，
+    # 无 Rosetta 2 翻译层（启动更快、无翻译损耗、排障不用穿翻译层）。
+    # 注意：arm64 包在 Intel Mac 上会报 "bad CPU type"，本仓库只面向 Apple Silicon。
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build arm64 .dmg (原生 Apple Silicon，不经过 Rosetta)
+        env:
+          ATPP_TARGET_ARCH: arm64
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          pip install -r requirements-macos.txt
+          python scripts/package_macos.py --clean
+
+      - name: Verify architecture (必须为 arm64)
+        run: |
+          echo "=== 应用二进制架构（应为 arm64）==="
+          lipo -info "dist/AT小PP.app/Contents/MacOS/AT小PP" || true
+          echo "=== dmg 产物 ==="
+          ls -lh release/AT小PP-macos.dmg
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AT小PP-macos-arm64
+          path: release/AT小PP-macos.dmg
+          if-no-files-found: error

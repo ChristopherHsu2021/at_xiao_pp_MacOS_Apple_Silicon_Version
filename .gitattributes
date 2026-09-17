@@ -1,0 +1,4 @@
+# 卸载脚本必须保持 CRLF 换行：cmd.exe 解析 LF 换行的批处理会在
+# goto/标签处异常中断，导致卸载中途死掉什么都不删（2026-09-04 回归根因）。
+*.bat text eol=crlf
+*.vbs text eol=crlf
