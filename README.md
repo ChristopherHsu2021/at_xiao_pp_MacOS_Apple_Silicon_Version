@@ -1,34 +1,31 @@
-# AT小PP · macOS 版（Intel / x86_64）
+# AT小PP · macOS 版（Apple Silicon · 原生 arm64）
 
 基于 PyQt6 的桌面宠物应用：陪伴互动 + 音乐播放器 + 待办 / 闹钟 / 计时器 + 场景玩法。
-本仓库是 **Intel（x86_64）发行线**，产物为 `.dmg`，挂载后把 `AT小PP.app` 拖进「应用程序」即可使用，卸载就是拖进废纸篓。
+本仓库是 **Apple Silicon（M 系列）原生 arm64 发行线**，产物为 `AT小PP-macos-arm64.dmg`，
+挂载后把 `AT小PP.app` 拖进「应用程序」即可使用，卸载就是拖进废纸篓。
 
-- 架构：`x86_64`（Intel Mac 原生运行；Apple Silicon Mac 经 Rosetta 2 运行）
-- 系统：macOS 10.15+
+- 架构：`arm64`（M1 / M2 / M3 / M4 及后续 Apple Silicon **原生运行，不依赖 Rosetta 2**）
+- 系统：macOS 11.0+（arm64 Mac 的实际最低版本）
 - 运行时：Python 3.13 + PyQt6 6.7.1
 - 版本：1.0 · Copyright © 2026 Christopher Hsu
 
-> 使用 Apple Silicon（M 系列）且希望跑**原生 arm64** 包，请移步专用仓库
-> [at_xiao_pp_MacOS_Apple_Silicon_Version](https://github.com/ChristopherHsu2021/at_xiao_pp_MacOS_Apple_Silicon_Version)。
+> 使用 **Intel 芯片 Mac** 或 **macOS 10.15** 的用户，请移步兼容性发行线
+> [at_xiao_pp_macOS_Intel_Version](https://github.com/ChristopherHsu2021/at_xiao_pp_macOS_Intel_Version)（x86_64 包，在 M 系列上经 Rosetta 2 亦可运行）。
+
+近期构建已修复 macOS 半透明窗口的残留重影、以及点击其他软件时桌面宠物 / 歌词浮窗被隐藏的问题。
 
 ---
 
 ## 下载与安装
 
-1. 到本仓库 [Releases](../../releases) 下载 `AT小PP-macos.dmg`。
+1. 到本仓库 [Releases](../../releases) 下载 `AT小PP-macos-arm64.dmg`。
 2. 双击挂载镜像，把里面的 **AT小PP.app** 拖进 `Applications`（或 `~/Applications`）。
-3. 首次启动若被系统拦下，任选其一：
-   - 在 Finder 中 **右键 → 打开**，弹窗里点「打开」；
-   - 或先清除隔离属性：
-
-     ```bash
-     xattr -dr com.apple.quarantine /Applications/AT小PP.app
-     ```
-
+3. 首次启动会被 macOS Gatekeeper 拦一次（未公证包的正常现象，详见下方「关于签名」与「常见问题」）。
+   按 [常见问题](#常见问题) 里的步骤放行一次即可，之后不再拦截。
 4. **卸载**：把 `AT小PP.app` 拖进废纸篓即可，没有卸载向导、不写系统目录。
 
 关于签名的说明：本包使用免费的 **ad-hoc 自签名**（`codesign --sign -`），未经 Apple 付费公证，
-因此从网络下载后首次打开可能提示「无法确认开发者」。这是未公证包的正常现象，按上面第 3 步处理一次即可。
+因此从网络下载后首次打开会提示拦截。这是未公证包的预期行为，**并非文件损坏**，按下面的步骤处理一次即可。
 
 用户数据（设置、待办、闹钟、曲库等）存放在
 `~/Library/Application Support/AT小PP`，重装 / 升级不会丢失。
@@ -67,12 +64,15 @@ Windows 原版移植到 macOS 时处理的关键差异，修改代码前建议�
 - **证书与字体**：冻结包无系统 CA 路径，https（在线搜索）依赖 `certifi` 显式指定证书；
   QSS 字体按平台切换为 `PingFang SC`，避免 macOS 上缺失 `Microsoft YaHei` 的告警。
 - **语音**：Windows SAPI5 在 macOS 上替换为系统 `say` 命令。
+- **窗口渲染（近期修复）**：半透明无边框窗口的残留重影根因在 macOS 窗口阴影缓存，已通过
+  `NoDropShadowWindowHint` 治本；点击其他软件时被隐藏，根因是 `Qt::Tool` 在 macOS 映射为
+  `NSPanel` 默认 `hidesOnDeactivate`，已通过底层 `setHidesOnDeactivate_(False)` 修正。
 
 ---
 
 ## 从源码运行
 
-需要在 **macOS** 上执行（PyInstaller 无法跨平台编译 `.app` / `.dmg`）。
+需要在 **macOS（Apple Silicon 或 Intel）** 上执行（PyInstaller 无法跨平台编译 `.app` / `.dmg`）。
 
 ```bash
 python3.13 -m venv .venv
@@ -90,14 +90,14 @@ python main.py
 ## 打包 .dmg
 
 ```bash
-# x86_64（默认，兼容性最强）
-ATPP_TARGET_ARCH=x86_64 python scripts/package_macos.py --clean
+# arm64（本仓库默认，Apple Silicon 原生，不经过 Rosetta）
+ATPP_TARGET_ARCH=arm64 python scripts/package_macos.py --clean
 
 # 可选：尝试 universal2（需宿主机 Python 与依赖均为通用二进制，否则自动回退）
 python scripts/package_macos.py --clean --universal
 ```
 
-产物：`release/AT小PP-macos.dmg`。
+产物：`release/AT小PP-macos-arm64.dmg`。
 
 脚本 `scripts/package_macos.py` 依次完成：生成 `app_icon.icns` → PyInstaller 打出
 `dist/AT小PP.app` → 裁剪无用 Qt 翻译与 QtPdf → 物化 libpython、写入 `qt.conf`、
@@ -106,13 +106,12 @@ python scripts/package_macos.py --clean --universal
 
 ### 持续集成
 
-`.github/workflows/build-macos.yml` 在 `macos-15`（Apple Silicon runner）上
-用 `arch -x86_64` 包裹整段构建并配合 Rosetta 2 交叉编译出 **x86_64** 包，
-触发方式为推送 `main` / `v*` tag 或手动 `workflow_dispatch`，产物作为 Actions artifact 上传。
+`.github/workflows/build-macos.yml` 在 `macos-15`（Apple Silicon runner）上**原生**构建 arm64 包
+（`ATPP_TARGET_ARCH=arm64`，不经过 Rosetta 2），触发方式为推送 `main` / `v*` tag 或手动 `workflow_dispatch`，
+产物作为 Actions artifact `AT小PP-macos-arm64` 上传。
 
-> 注意：`actions/setup-python` 的 `architecture: x64` 在 macOS 上是空操作，
-> 必须显式用 `arch -x86_64` 包裹 venv、依赖安装与 PyInstaller，否则会产出 arm64 包
-> （Intel 机运行时报 `bad CPU type`）。
+> 注意：本仓库直接产出 arm64 二进制，无需交叉编译；请在 Apple Silicon 宿主机或 macos-15 runner 上构建，
+> 在纯 x86_64 环境会编译失败。
 
 ---
 
@@ -135,11 +134,17 @@ Windows 打包说明另见 [PACKAGE_WINDOWS.md](PACKAGE_WINDOWS.md)。
 ## 常见问题
 
 **打不开 / 提示「App 已损坏」或「无法确认开发者」**
-未公证包的正常拦截，右键 → 打开，或执行一次
-`xattr -dr com.apple.quarantine /Applications/AT小PP.app`。
+未公证包的正常拦截，按以下顺序处理：
+1. 打开「系统设置 → 隐私与安全性」，滚到最底部点「仍要打开」；
+2. 或在终端执行 `xattr -dr com.apple.quarantine /Applications/AT小PP.app`；
+3. 若提示「已损坏，移到废纸篓」，改用 `xattr -cr /Applications/AT小PP.app`
+   （`-r` 递归清除 App 内部所有动态库的隔离标记）；
+4. 仍不行则本地 ad-hoc 重签：`sudo codesign --force --deep -s - /Applications/AT小PP.app`。
+（macOS Sequoia 15+ 已移除「右键 → 打开」的绕过方式，优先用系统设置法。）
 
-**Intel Mac 上启动报 `bad CPU type in executable`**
-说明拿到的是 arm64 包，请改用本仓库的 x86_64 构建。
+**在 Intel Mac 上启动报 `bad CPU type in executable`**
+说明拿到的是 arm64 包。本仓库仅提供 arm64 包，请改用
+[at_xiao_pp_macOS_Intel_Version](https://github.com/ChristopherHsu2021/at_xiao_pp_macOS_Intel_Version) 的 x86_64 包。
 
 **能启动但播放没有声音**
 构建期已校验 `plugins/multimedia` 与 QtMultimedia 动态库；若仍无声，
