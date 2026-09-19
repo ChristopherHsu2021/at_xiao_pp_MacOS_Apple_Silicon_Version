@@ -8,6 +8,7 @@
 """
 
 import os
+import sys
 import random
 import math
 from datetime import datetime
@@ -25,6 +26,31 @@ from app.core.i18n import tr
 from app.ui.status_panel import StatusPanel
 from app.ui.context_menu import build_menu
 from app.ui.common import UploadPrompt
+
+
+def _apply_macos_always_on_top(widget):
+    """macOS 专属：让窗口在所有 App 之上且切换 App 不被隐藏。
+
+    Qt 的 WindowStaysOnTopHint 在 macOS 仅把窗口设为 NSFloatingWindowLevel（浮层），
+    但 Qt.Tool 会被映射成 NSPanel；AppKit 默认在应用失活(hidesOnDeactivate)时隐藏面板，
+    表现即『点开其他软件，桌宠被隐藏』。这里直接对底层 NSWindow 关闭该行为并锁定浮层层级，
+    实现真正意义的『置顶且不被切换隐藏』。其他平台无 PyObjC，直接跳过。
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import objc
+        from ctypes import c_void_p
+        from AppKit import NSWindow, NSFloatingWindowLevel
+        nsview = objc.objc_object(c_void_p=int(widget.winId()))
+        nswindow = nsview.window()
+        if nswindow is not None:
+            nswindow.setHidesOnDeactivate_(False)
+            nswindow.setLevel_(NSFloatingWindowLevel)
+    except Exception:
+        # 任何环境差异 / PyObjC 缺失都不应影响主流程
+        pass
+
 
 EMOJIS = [
     "😎", "🥰", "🤩", "🎤", "✨", "🌟", "🫧", "💤", "🍓", "🎵", "🔥", "☀️",
@@ -118,6 +144,12 @@ class PetWindow(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
+            # macOS 重影治本（第十六类坑）：NSWindow 阴影由窗口服务器绘制在 Qt
+            # 画布之外，并按窗口透明形状缓存。状态图切换（睡觉↔清醒）后旧形状
+            # 的阴影（灰黑色、恰似"黑白重影"）残留在画面后方，Qt 侧任何
+            # repaint/Clear 都擦不掉（像素不在可重绘区域内）。去掉系统阴影
+            # （NoDropShadowWindowHint）后窗口服务器不再缓存形状 → 重影失去来源。
+            | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # SubWindow 在 Windows 上经常不会被资源管理器识别为文件投放目标。
@@ -131,6 +163,13 @@ class PetWindow(QWidget):
         self.setMouseTracking(True)
         state.outfitChanged.connect(lambda _=None: self.refresh_image())
         self._enter_random_outfit()
+
+    def showEvent(self, e):  # noqa: N802
+        # macOS 专属：Qt.Tool 映射成 NSPanel，AppKit 默认在应用失活（点开其他软件）
+        # 时隐藏面板，导致桌宠被隐藏。showEvent 里对底层 NSWindow 关闭该行为，
+        # 实现『置顶且切换 App 不被隐藏』。仅窗口属性调整，无业务改动。
+        super().showEvent(e)
+        _apply_macos_always_on_top(self)
 
     # ---------------- 构建 ----------------
     def _build(self):

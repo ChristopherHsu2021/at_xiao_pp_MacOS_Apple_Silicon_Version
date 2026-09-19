@@ -1774,6 +1774,30 @@ class GradientLyricLabel(QWidget):
         out.end()
 
 
+def _apply_macos_always_on_top(widget):
+    """macOS 专属：让窗口在所有 App 之上且切换 App 不被隐藏。
+
+    Qt 的 WindowStaysOnTopHint 在 macOS 仅把窗口设为 NSFloatingWindowLevel（浮层），
+    但 Qt.Tool 会被映射成 NSPanel；AppKit 默认在应用失活(hidesOnDeactivate)时隐藏面板，
+    表现即『点开其他软件，浮窗被隐藏』。这里直接对底层 NSWindow 关闭该行为并锁定浮层层级，
+    实现真正意义的『置顶且不被切换隐藏』。其他平台无 PyObjC，直接跳过。
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import objc
+        from ctypes import c_void_p
+        from AppKit import NSWindow, NSFloatingWindowLevel
+        nsview = objc.objc_object(c_void_p=int(widget.winId()))
+        nswindow = nsview.window()
+        if nswindow is not None:
+            nswindow.setHidesOnDeactivate_(False)
+            nswindow.setLevel_(NSFloatingWindowLevel)
+    except Exception:
+        # 任何环境差异 / PyObjC 缺失都不应影响主流程
+        pass
+
+
 class LyricOverlayWindow(QDialog):
     BASE_W = 730
     BASE_H = 94
@@ -1791,7 +1815,13 @@ class LyricOverlayWindow(QDialog):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.Tool |
+            # macOS 重影治本（第十六类坑，同 pet_window）：残影来自 NSWindow
+            # 阴影对旧透明形状（上一句歌词字形）的缓存，绘制在 Qt 画布之外，
+            # run#29 的离屏 Source 渲染/整窗 Clear 均触达不到。去掉系统阴影后
+            # 浮窗再次显示时不再带回上一会话的字形阴影 → 点人物/点歌词框
+            # 打开浮窗时的"其他唱段歌词重影"失去来源。
+            Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -1800,6 +1830,14 @@ class LyricOverlayWindow(QDialog):
         self._apply_scale()
         music.player.positionChanged.connect(self.sync)
         music.player.playbackStateChanged.connect(self.sync)
+
+    def showEvent(self, e):  # noqa: N802
+        # 第三重保险：半透明窗口 hide→show 后，macOS 可能保留上一会话末帧于
+        # backing store；show 完成后异步强制一次整窗同步重绘，确保首帧就是
+        # 全新内容（仅渲染路径，无业务改动）。
+        super().showEvent(e)
+        _apply_macos_always_on_top(self)
+        QTimer.singleShot(0, self.repaint)
 
     def paintEvent(self, e):  # noqa: N802
         # 第二重保险：半透明悬浮窗每帧先丢弃上一帧整帧像素，防止 macOS
