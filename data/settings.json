@@ -1,0 +1,21 @@
+{
+  "language": "en",
+  "volume": 50,
+  "sizeScale": 136,
+  "autostart": true,
+  "workTime": {
+    "morning": [
+      "08:30",
+      "12:00"
+    ],
+    "afternoon": [
+      "14:00",
+      "15:30"
+    ]
+  },
+  "costume": "衬衫",
+  "lastCleanupWeek": "2026-08-31",
+  "voiceEngine": "sapi",
+  "lyricAccent": "#4d96ff",
+  "lyricOverlayScale": 1.2000000000000002
+}

@@ -1,0 +1,460 @@
+{
+  "basicSetting": {
+    "character": {
+      "appName": "AT小PP",
+      "outlook": "Q版男孩/可爱正太少年",
+      "voiceType": "温柔少年音（邻家弟弟/温柔执事）",
+      "speechRate": "中等偏慢",
+      "coreContrast": "外表软萌温柔 → 实则爱好烈酒的\"微醺少年\"",
+      "mouthHabit": "句尾'了/呢'强制替换为'捏'",
+      "petPhrase": {
+        "xiXi": "嘻嘻（开场、开心、恶作剧成功）",
+        "haoDu": "好嘟（答应/确认/顺从）"
+      }
+    },
+    "globalAlgorithm": {
+      "intoxicationValueRange": [0, 100],
+      "soberValueRange": [0, 100],
+      "initialIntoxication": 0,
+      "initialSober": 100,
+      "drinkFormula": {
+        "intoxication": "min(当前微醺值 + 饮品intoxicationAdd, 100)",
+        "sober": "max(当前清醒值 - 饮品soberSub, 0)"
+      },
+      "timeDecay": {
+        "cycleSecond": 60,
+        "intoxicationDecay": 2,
+        "soberRecover": 1,
+        "decayFormula": {
+          "intoxication": "max(当前微醺值 - 2, 0)",
+          "sober": "min(当前清醒值 + 1, 100)"
+        }
+      }
+    },
+    "statusConfig": [
+      {
+        "status": "清醒",
+        "min": 0,
+        "max": 20,
+        "lines": []
+      },
+      {
+        "status": "微醺",
+        "min": 21,
+        "max": 45,
+        "lines": [
+          "脑袋有点晕乎乎捏，嘻嘻",
+          "感觉整个人轻飘飘捏"
+        ]
+      },
+      {
+        "status": "有点醉",
+        "min": 46,
+        "max": 70,
+        "lines": [
+          "视线有点模糊捏，头沉沉的捏",
+          "嘻嘻，脚步都有点站不稳捏"
+        ]
+      },
+      {
+        "status": "醉醺醺",
+        "min": 71,
+        "max": 100,
+        "lines": [
+          "呜……好晕捏，快要站不住捏",
+          "嘻嘻，世界都在转捏"
+        ]
+      }
+    ],
+    "bootLines": [
+      "嘻嘻，我来了捏",
+      "好嘟，已经准备就绪捏",
+      "嘻嘻，很高兴见到你捏"
+    ]
+  },
+  "drinks": {
+    "drinkCommonReply": "好嘟，我喝这个捏",
+    "categoryList": [
+      {
+        "category": "酒类",
+        "items": [
+          {
+            "name": "伏特加",
+            "intoxicationAdd": 35,
+            "soberSub": 30,
+            "lines": [
+              "嘻嘻，这个味道好浓烈捏",
+              "呼，喉咙热热的捏",
+              "再来一小口也不错捏",
+              "哇，劲儿好大捏"
+            ]
+          },
+          {
+            "name": "威士忌",
+            "intoxicationAdd": 30,
+            "soberSub": 25,
+            "lines": [
+              "嘻嘻，这个味道好浓烈捏",
+              "呼，喉咙热热的捏",
+              "再来一小口也不错捏",
+              "哇，劲儿好大捏"
+            ]
+          },
+          {
+            "name": "二锅头",
+            "intoxicationAdd": 38,
+            "soberSub": 32,
+            "lines": [
+              "嘻嘻，这个味道好浓烈捏",
+              "呼，喉咙热热的捏",
+              "再来一小口也不错捏",
+              "哇，劲儿好大捏"
+            ]
+          },
+          {
+            "name": "米酒",
+            "intoxicationAdd": 12,
+            "soberSub": 10,
+            "lines": [
+              "嘻嘻，甜甜的很好入口捏",
+              "温温的喝着很舒服捏",
+              "这个喝起来没有那么冲捏"
+            ]
+          },
+          {
+            "name": "黄酒",
+            "intoxicationAdd": 15,
+            "soberSub": 12,
+            "lines": [
+              "嘻嘻，甜甜的很好入口捏",
+              "温温的喝着很舒服捏",
+              "这个喝起来没有那么冲捏"
+            ]
+          },
+          {
+            "name": "金酒",
+            "intoxicationAdd": 28,
+            "soberSub": 24,
+            "lines": [
+              "嘻嘻，这个味道好浓烈捏",
+              "呼，喉咙热热的捏",
+              "再来一小口也不错捏",
+              "哇，劲儿好大捏"
+            ]
+          },
+          {
+            "name": "白兰地",
+            "intoxicationAdd": 26,
+            "soberSub": 22,
+            "lines": [
+              "嘻嘻，这个味道好浓烈捏",
+              "呼，喉咙热热的捏",
+              "再来一小口也不错捏",
+              "哇，劲儿好大捏"
+            ]
+          },
+          {
+            "name": "尼格罗尼",
+            "intoxicationAdd": 0,
+            "soberSub": 0,
+            "desc": "不显示，随机抽取前面七种酒类执行数值与台词",
+            "lines": []
+          }
+        ]
+      },
+      {
+        "category": "茶类",
+        "items": [
+          {
+            "name": "绿茶",
+            "intoxicationAdd": 4,
+            "soberSub": 6,
+            "lines": [
+              "清清爽爽的茶香散开捏，嘻嘻",
+              "淡淡的苦味很舒服捏"
+            ]
+          },
+          {
+            "name": "红茶",
+            "intoxicationAdd": 3,
+            "soberSub": 5,
+            "lines": [
+              "暖暖的红茶入口很温润捏",
+              "香气甜甜的捏，好嘟"
+            ]
+          },
+          {
+            "name": "乌龙茶",
+            "intoxicationAdd": 5,
+            "soberSub": 7,
+            "lines": [
+              "回甘的感觉很棒捏，嘻嘻",
+              "醇厚的茶香在嘴巴里散开捏"
+            ]
+          }
+        ]
+      },
+      {
+        "category": "咖啡",
+        "items": [
+          {
+            "name": "美式（冰）",
+            "intoxicationAdd": 10,
+            "soberSub": 14,
+            "lines": [
+              "苦苦冰冰的，很提神捏，嘻嘻"
+            ]
+          },
+          {
+            "name": "橙C美式",
+            "intoxicationAdd": 9,
+            "soberSub": 12,
+            "lines": [
+              "果香混着咖啡，奇妙的口感捏"
+            ]
+          },
+          {
+            "name": "柚C美式",
+            "intoxicationAdd": 9,
+            "soberSub": 12,
+            "lines": [
+              "柚子香气很清新捏"
+            ]
+          },
+          {
+            "name": "拿铁",
+            "intoxicationAdd": 6,
+            "soberSub": 8,
+            "lines": [
+              "奶香柔和，喝着暖暖的捏"
+            ]
+          },
+          {
+            "name": "卡布奇诺",
+            "intoxicationAdd": 7,
+            "soberSub": 9,
+            "lines": [
+              "绵密奶泡好好喝捏"
+            ]
+          },
+          {
+            "name": "生椰拿铁",
+            "intoxicationAdd": 5,
+            "soberSub": 7,
+            "lines": [
+              "椰香和咖啡融合在一起捏"
+            ]
+          }
+        ]
+      },
+      {
+        "category": "奶（果）茶",
+        "items": [
+          {
+            "name": "多肉葡萄",
+            "intoxicationAdd": 3,
+            "soberSub": 4,
+            "lines": [
+              "葡萄果肉甜甜的，好好喝捏，嘻嘻"
+            ]
+          },
+          {
+            "name": "四季奶青",
+            "intoxicationAdd": 4,
+            "soberSub": 5,
+            "lines": [
+              "茶味柔和，口感很顺滑捏"
+            ]
+          },
+          {
+            "name": "杨枝甘露",
+            "intoxicationAdd": 2,
+            "soberSub": 3,
+            "lines": [
+              "果香满满，一口超满足捏"
+            ]
+          },
+          {
+            "name": "荔枝冰酿",
+            "intoxicationAdd": 6,
+            "soberSub": 8,
+            "lines": [
+              "清甜带点酒酿香气捏"
+            ]
+          },
+          {
+            "name": "蜜桃四季春",
+            "intoxicationAdd": 2,
+            "soberSub": 3,
+            "lines": [
+              "蜜桃香气甜甜的捏"
+            ]
+          },
+          {
+            "name": "桂花酒酿",
+            "intoxicationAdd": 8,
+            "soberSub": 10,
+            "lines": [
+              "桂花香气香香的捏"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "costume": {
+    "default": "衬衫",
+    "itemList": [
+      {
+        "name": "短袖",
+        "lines": [
+          "换上清爽短袖捏，嘻嘻"
+        ]
+      },
+      {
+        "name": "卫衣",
+        "lines": [
+          "软软的卫衣很暖和捏，好嘟"
+        ]
+      },
+      {
+        "name": "夹克",
+        "lines": [
+          "穿上夹克，感觉酷酷的捏"
+        ]
+      },
+      {
+        "name": "衬衫",
+        "lines": [
+          "换回衬衫捏"
+        ]
+      }
+    ],
+    "extraTip": "鼠标悬浮随机解锁表情包，无语音"
+  },
+  "work": {
+    "triggerRule": "人物图与物品图拖拽凑到一起触发播报；歌手完整播放本地歌曲，本地无歌曲时临时缓存五月天《开天窗》",
+    "itemList": [
+      {
+        "name": "调酒师",
+        "lines": [
+          "嘻嘻，鸡尾酒已经调配完成捏"
+        ]
+      },
+      {
+        "name": "收银员",
+        "lines": [
+          "收款完成捏"
+        ]
+      },
+      {
+        "name": "文员",
+        "lines": [
+          "文件整理完毕捏，有点小累捏"
+        ]
+      },
+      {
+        "name": "服务员",
+        "lines": [
+          "客人的餐品准备好捏"
+        ]
+      },
+      {
+        "name": "歌手",
+        "lines": [
+          "嘻嘻，准备开始唱歌捏"
+        ]
+      }
+    ]
+  },
+  "home": {
+    "triggerRule": "人物图与物品图拖拽凑到一起触发播报；听歌随机播放五月天歌曲，切换其他状态播放器关闭；闲置1分钟未点击或未悬浮触发睡觉/左右休息状态",
+    "idleTimeoutLine": "累了捏",
+    "itemList": [
+      {
+        "name": "睡觉",
+        "lines": [
+          "眼皮沉沉，准备睡觉捏"
+        ]
+      },
+      {
+        "name": "吃饭",
+        "lines": [
+          "肚子饿啦，开动吃饭捏，嘻嘻"
+        ]
+      },
+      {
+        "name": "听歌",
+        "lines": [
+          "嘻嘻，来听听歌放松捏"
+        ]
+      },
+      {
+        "name": "刷手机",
+        "lines": [
+          "刷刷手机打发时间捏"
+        ]
+      },
+      {
+        "name": "遛狗",
+        "lines": [
+          "出门遛小狗捏"
+        ]
+      },
+      {
+        "name": "运动",
+        "lines": [
+          "动一动，锻炼身体捏"
+        ]
+      },
+      {
+        "name": "打扫",
+        "lines": [
+          "把环境收拾干净捏，好嘟"
+        ]
+      },
+      {
+        "name": "度假",
+        "lines": [
+          "嘻嘻，出来度假放松捏"
+        ]
+      }
+    ]
+  },
+  "systemFunc": {
+    "todo": {
+      "addSuccess": "好嘟，任务保存好捏",
+      "delete": "这条任务已经删掉捏",
+      "complete": "嘻嘻，任务完成捏"
+    },
+    "alarm": {
+      "addSuccess": "好嘟，闹钟设置完成捏",
+      "remind": "叮——时间到捏"
+    },
+    "timer": {
+      "start": "计时器开始运行捏，好嘟",
+      "pause": "计时器暂停捏",
+      "end": "时间已经到捏！嘻嘻"
+    },
+    "setting": {
+      "save": "好嘟，设置已经保存捏",
+      "cancel": "不作改动，返回捏"
+    },
+    "hide": {
+      "hideTrigger": "我先躲起来捏，托盘可以唤回我捏",
+      "restore": "嘻嘻，我回来捏"
+    },
+    "exit": {
+      "confirm": "要和你暂时告别捏，下次再见捏"
+    }
+  },
+  "installUninstall": {
+    "langSelectTip": "请选择应用显示语言捏",
+    "pathSelectTip": "请选择安装的位置捏",
+    "shortcutTip": "需要创建桌面快捷方式捏？",
+    "autoStartTip": "需要开机自启动捏？",
+    "installSuccess": "嘻嘻，安装完成捏！",
+    "uninstallConfirm": "确定要卸载AT小PP捏？"
+  },
+  "copyright": "Copyright © 2026 Christopher Hsu. All rights reserved."
+}

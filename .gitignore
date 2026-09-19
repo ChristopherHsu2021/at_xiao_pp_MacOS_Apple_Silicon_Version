@@ -1,0 +1,35 @@
+# Python / 构建产物
+__pycache__/
+*.pyc
+*.pyo
+*.spec.bak
+
+# 本地虚拟环境
+venv/
+.venv/
+
+# PyInstaller / 打包产物
+build/
+dist/
+release/
+*.exe
+
+# 生成与缓存资源
+build_assets/
+data/music/temp/
+data/settings.json
+data/state.json
+data/alarms.json
+data/todos.json
+
+# 安装包与发布文件
+installer/*.exe
+release/*.exe
+release/*.zip
+
+# 本地运行痕迹
+*.log
+*.tmp
+
+# WorkBuddy 内部记忆 / agent 数据（非项目源码）
+.workbuddy/
