@@ -83,6 +83,7 @@ from PyQt6.QtCore import Qt, QPoint, QRect, QRectF, QTimer
 from PyQt6.QtGui import QCursor, QColor, QFont, QFontMetrics, QPainter, QPen
 
 from app.core import todo
+from app.core.todo_signals import bus
 from app.core.i18n import tr
 from app.ui.todo_window import TaskRow, LIST_WINDOW_SIZE   # noqa: F401  (LIST_WINDOW_SIZE 保留供参考/将来对齐)
 from app.ui.screen_fit import scale_qss, s
@@ -198,6 +199,10 @@ class TodoDock(QWidget):
         self.setFixedWidth(_DOCK_WIDTH)
         self._build()
         self.refresh()
+        # 订阅全局 done_changed：列表页 / 便签任一入口勾选本挂件的某条任务时，该行
+        # 标题渲染（删除线 + 置灰）即刻就地同步，无需等整表重建。UniqueConnection 防重复连。
+        bus().done_changed.connect(self._on_done_changed,
+                                    Qt.ConnectionType.UniqueConnection)
 
         # 点击穿透按平台接入：macOS 用原生 hitTest 覆盖；Windows 用 WM_NCHITTEST；
         # 其它（含注入失败）用 Qt 粒度 WA_TransparentForMouseEvents 兜底。
@@ -549,6 +554,17 @@ class TodoDock(QWidget):
         self.ctx.refresh_todo()
         if self.ctx.windows.get("todo") is None:
             self._render()
+
+    def _on_done_changed(self, tid, done):
+        """全局完成态变化（来自列表/Dock/便签任意入口）：就地刷新本挂件对应行的标题渲染。
+
+        挂件行由 ``TaskRow`` 承载，复用与列表页同一套 ``set_done_state``（删除线 + 置灰）。
+        信号源自己那一行收到广播时幂等早退，不重复做事。
+        """
+        for row in self._rows:
+            if getattr(row, "task", None) and row.task.get("id") == tid:
+                row.set_done_state(done)
+                break
 
     def _fit_height(self):
         """可视高度 = 标题行 + **最多 5 条任务**；超过 5 条则高度固定，其余靠滚动查看。

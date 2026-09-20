@@ -25,6 +25,7 @@ from app.core import todo, config
 from app.core import alarm as alarm_mod
 from app.core.voice import say
 from app.core.i18n import tr
+from app.core.todo_signals import bus
 from app.ui.common import (
     PeekCard, NoticeDialog, promote_popup_topmost,
     EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui,
@@ -900,6 +901,26 @@ class TaskRow(QWidget):
             self.text.setStyleSheet(LABEL_QSS)
             self.text.set_done(False)
 
+    def set_done_state(self, done):
+        """由全局 ``done_changed`` 信号驱动：就地刷新本行标题渲染（删除线 + 置灰）。
+
+        不重持久化——持久化已由信号源（``todo.toggle`` / ``todo.set_done``）完成。
+        幂等：done 没变就早退，所以「信号源自己那一行」收到自己的广播也不会重复做事。
+
+        注意：必须用 ``blockSignals`` 包住 ``setChecked``——否则设复选框会触发它的
+        ``toggled`` → 再次进入 ``_toggled`` → 二次 ``todo.toggle`` 把状态翻回 → 死循环/抖动。
+        """
+        done = bool(done)
+        if self.task.get("done") == done:
+            return
+        self.task["done"] = done
+        self.check.blockSignals(True)
+        try:
+            self.check.setChecked(done)
+        finally:
+            self.check.blockSignals(False)
+        self._apply()
+
 
 # 任务清单（列表页）窗口尺寸（MacBook Air 2020 / 1440×900 基准：宽与桌面挂件对齐，
 # 高放宽到 560 可多显示约 8~9 条任务）。桌面挂件 TodoDock 也以它的宽度为基准：
@@ -937,6 +958,10 @@ class TodoWindow(QDialog):
         fit_window(self, "todo_list", resizable=True)
         self._build()
         self._build_grips()
+        # 订阅全局 done_changed：列表行 / 便签（若已打开）就地刷新标题渲染，
+        # 与「Dock 勾选 / 便签勾选」也即时同步（无需整表重建）。UniqueConnection 防重复连。
+        bus().done_changed.connect(self._on_done_changed,
+                                    Qt.ConnectionType.UniqueConnection)
 
     def _build(self):
         frame_root = QVBoxLayout(self)
@@ -1643,6 +1668,21 @@ class TodoWindow(QDialog):
         if win is not None:
             win.sync_state()
 
+    def _on_done_changed(self, tid, done):
+        """全局完成态变化（来自列表/Dock/便签任意入口）：就地刷新本窗口的相关渲染。
+
+        - 列表里该任务的行：``TaskRow.set_done_state``（删除线 + 置灰），不整表重建。
+        - 该任务已打开的便签窗口：``sync_state`` 刷标题删除线/颜色与确认键。
+        信号源自己那一行/便签也会收到广播，处理函数幂等，不会重复做事。
+        """
+        for row in self.findChildren(TaskRow):
+            if row.task.get("id") == tid:
+                row.set_done_state(done)
+                break
+        sticky = self.sticky_windows.get(tid)
+        if sticky is not None:
+            sticky.sync_state()
+
     def _prune_stickies(self):
         """任务被删除后，关闭其对应的便签窗口。"""
         ids = {t["id"] for t in todo.all_tasks()}
@@ -1863,6 +1903,10 @@ class StickyNoteWindow(QWidget):
         self.title.setText(task.get("title", "") or "")
         self.editor.set_html(task.get("content", ""))
         self.sync_state()
+        # 订阅全局 done_changed：列表行 / Dock 行任一入口勾选本任务时，本便签标题
+        # 删除线/颜色与确认键即刻同步（无需靠列表的 notify_sticky 特例）。UniqueConnection 防重复连。
+        bus().done_changed.connect(self._on_done_changed,
+                                    Qt.ConnectionType.UniqueConnection)
 
     # ---------- 构建 ----------
     def _build_note(self):
@@ -2055,10 +2099,17 @@ class StickyNoteWindow(QWidget):
             return
         new = not cur["done"]
         todo.set_done(self.task_id, new)
-        self.todo_window._render()   # 刷新列表项划线/颜色
-        self.sync_state()            # 刷新本窗口标题与确认键
+        # 列表项 / Dock 行 / 本便签的标题渲染由全局 done_changed 总线就地同步
+        # （见各窗口 _on_done_changed），这里只负责刷新本窗口自身 + 闹钟播报。
+        self.sync_state()
         if new:
             speak_later(config.character.system_func.get("todo", {}).get("complete", "嘻嘻，任务完成捏"))
+
+    def _on_done_changed(self, tid, done):
+        """全局完成态变化：仅当变化的正是本便签对应的任务时，刷新标题删除线/颜色与确认键。"""
+        if tid != self.task_id:
+            return
+        self.sync_state()
 
     def preview_priority(self, prio):
         """编辑页实时预览：仅刷新左上角呼吸灯颜色与提示语，不改动其它状态。

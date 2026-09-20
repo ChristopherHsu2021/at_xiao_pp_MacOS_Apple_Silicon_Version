@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from app.core import pathutil, config
 from app.core import alarm as alarm_mod
+from app.core.todo_signals import bus
 
 PATH = pathutil.data_file("todos.json")
 
@@ -71,6 +72,9 @@ def toggle(tid) -> bool:
                 t["alarm_id"] = None
                 t["remind"] = None
             save(tasks)
+            # 广播完成态变化：列表页 / TodoDock / 便签页各自订阅、就地刷新标题渲染
+            # （删除线 + 置灰），实现「一处勾选，三处即刻同步」。
+            bus().done_changed.emit(tid, t["done"])
             return t["done"]
     return False
 
@@ -192,6 +196,9 @@ def set_done(tid, done: bool) -> bool:
                 t["alarm_id"] = None
                 t["remind"] = None
             save(tasks)
+            # 广播完成态变化：列表页 / TodoDock / 便签页各自订阅、就地刷新标题渲染
+            # （删除线 + 置灰），实现「一处勾选，三处即刻同步」。
+            bus().done_changed.emit(tid, t["done"])
             return t["done"]
     return False
 
