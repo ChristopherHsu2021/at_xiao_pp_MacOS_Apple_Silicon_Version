@@ -31,12 +31,21 @@ from app.ui.common import (
 )
 from app.ui.screen_fit import fit_window, scale_qss, s, WINDOW_DEFAULTS
 from app.ui.style import (
-    TASK_TITLE_DONE_FG, TASK_TITLE_FG, TASK_TITLE_SIZE, TASK_TITLE_WEIGHT,
+    TASK_TITLE_FG, TASK_TITLE_SIZE, TASK_TITLE_WEIGHT,
     TITLE_BAR_QSS, PAGE_TITLE_SIZE, task_title_qss,
 )
 from app.ui.mac_window import apply_stage_exempt
 from app.ui.context_menu import ActionPopupMenu, ACTION_POPUP_QSS
 from app.ui.rich_editor import RichEditor, svg_icon
+
+
+# 「任务标题」字体本体（字号/字重/颜色）在 WINDOW_QSS 里的插值片段 —— 取值全部来自
+# app/ui/style.TASK_TITLE_*，与清单行 / TodoDock 行 / 便签标题同源（改 style.py 一处即可）。
+# 注意：WINDOW_QSS 外层还有一层 scale_qss，所以这里写的是**设计像素**（不要自己缩放）。
+_TITLE_INPUT_FONT = (
+    f"font-size:{TASK_TITLE_SIZE}px;font-weight:{TASK_TITLE_WEIGHT};"
+    f"color:{TASK_TITLE_FG};"
+)
 
 
 WINDOW_QSS = scale_qss("""
@@ -118,11 +127,11 @@ QScrollBar:vertical { width: 4px; background: transparent; margin: 6px 0; }
 QScrollBar::handle:vertical { background: rgba(160,142,122,0.35); border-radius: 2px; min-height: 24px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 /* 添加/编辑页：标题输入 + 字段标签 + 优先级 chips + 底部按钮（对齐 index.html） */
-/* font-size/font-weight/color 与 app/ui/style.TASK_TITLE_*（16px/600/#3B2A1A）保持一致：
-   它就是「任务标题」这套渲染在添加页的落点，改字号时两处一起改（见 style.py 注释）。 */
+/* 标题输入框就是「任务标题」这套渲染在添加页的落点：字号/字重/颜色从
+   app/ui/style.TASK_TITLE_* 插值进来（**不再手写数字**），改 style.py 一处即可全局同步。 */
 QLineEdit#titleInput {
     border: 1.5px solid #F1E4D3; border-radius: 14px;
-    background: #FFFDFA; font-size: 16px; font-weight: 600; color: #3B2A1A;
+    background: #FFFDFA; """ + _TITLE_INPUT_FONT + """
     padding: 0 16px;
 }
 QLineEdit#titleInput:focus { border-color: #F97316; background: #fff; }
@@ -2071,7 +2080,7 @@ class StickyNoteWindow(QWidget):
         f = self.title.font()
         f.setStrikeOut(self._done)
         self.title.setFont(f)
-        self.title.setStyleSheet(scale_qss(self._title_qss(self._done)))
+        self.title.setStyleSheet(self._title_qss(self._done))
         self.btn_complete.setIcon(QIcon(self._btn_icon("complete", False)))
         self.btn_complete.setIconSize(QSize(s(20), s(20)))
 
@@ -2085,18 +2094,19 @@ class StickyNoteWindow(QWidget):
             editor.retranslate()
 
     def _title_qss(self, done):
-        # 与「任务清单行 / TodoDock 行」共用同一套任务标题渲染（app/ui/style.TASK_TITLE_*）：
-        # 字号 / 字重 / 颜色 / 完成态颜色全部一致 —— 2026-09-21 需求「三处渲染同步」。
+        # 与「任务清单行 / TodoDock 行 / 添加页标题输入框」共用同一套任务标题渲染：
+        # 字体本体（字号/字重/颜色/完成态删除线）只在 style.task_title_qss 里定义一次，
+        # 便签只通过 extra 追加自己的「结构性差异」，不重复写字体 —— 保证「一处变全跟着变」。
         # 唯一保留的差异是这条 2px 下划线：它是便签「标题可直接编辑」的唯一视觉提示，
-        # 去掉后整张卡片看不出哪里能改标题（如需彻底一致，删掉 border-bottom 即可）。
+        # 去掉后整张卡片看不出哪里能改标题（如需彻底一致，删掉 extra 即可）。
         # HTML 参考：text-xl font-medium title-underline(2px #d8d8d8) pb-1(4px)
-        color = TASK_TITLE_DONE_FG if done else TASK_TITLE_FG
+        body = task_title_qss(
+            done, extra="border-bottom:2px solid #d8d8d8;padding:0 2px 4px 2px;"
+        )
         return (
             "QLineEdit#stickyTitle{background:transparent;border:none;"
-            "border-bottom:2px solid #d8d8d8;"
-            f"font-size:{TASK_TITLE_SIZE}px;font-weight:{TASK_TITLE_WEIGHT};"
-            f"color:{color};padding:0 2px 4px 2px;}}"
-            "QLineEdit#stickyTitle:focus{border-bottom-color:#F97316;}"
+            + body +
+            "}QLineEdit#stickyTitle:focus{border-bottom-color:#F97316;}"
         )
 
     # ---------- 置顶 = 锁定不可移动/缩放 ----------

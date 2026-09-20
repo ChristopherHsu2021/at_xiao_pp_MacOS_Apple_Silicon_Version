@@ -133,16 +133,23 @@ TASK_TITLE_FG = "#3B2A1A"
 TASK_TITLE_DONE_FG = "#A08E7A"
 
 
-def task_title_qss(done=False):
-    """任务标题样式（任务清单行 / TodoDock 行 / 便签标题 共用）。
+def task_title_qss(done=False, extra=""):
+    """任务标题样式（任务清单行 / TodoDock 行 / 便签标题 / 添加页标题输入框 共用）。
 
     ``done=True`` → 灰字 + 删除线（与 ElideLabel.set_done 自绘的删除线同色同义）。
+
+    ``extra``：追加声明（按**设计像素**写，随本函数一起被 scale_qss 缩放）。
+    用于承载「各处的结构性差异」而不重复写字体本身 —— 例如便签标题的 2px 下划线：
+    这样将来给标题增删字体属性（字号/字重/字距/颜色…），四处会自动一起变，
+    不会出现「改了 style.py，便签还是老样子」的漏改。
+
+    唯一来源约定：**字号/字重/颜色/删除线只允许在本函数里出现一次**。
     """
     color = TASK_TITLE_DONE_FG if done else TASK_TITLE_FG
     strike = "text-decoration:line-through;" if done else ""
     return scale_qss(
         f"font-size:{TASK_TITLE_SIZE}px;color:{color};"
-        f"font-weight:{TASK_TITLE_WEIGHT};{strike}"
+        f"font-weight:{TASK_TITLE_WEIGHT};{strike}{extra}"
     )
 
 
