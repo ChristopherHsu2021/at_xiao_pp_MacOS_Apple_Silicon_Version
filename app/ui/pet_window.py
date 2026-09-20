@@ -26,11 +26,11 @@ from app.core.i18n import tr
 from app.ui.status_panel import StatusPanel
 from app.ui.context_menu import build_menu
 from app.ui.common import UploadPrompt
-from app.ui.mac_window import apply_stage_exempt
+from app.ui.mac_window import apply_stage_exempt, enable_first_mouse
 
 
 def _apply_macos_always_on_top(widget):
-    """macOS 专属：让窗口在所有 App 之上且切换 App 不被隐藏。
+    """macOS 专属：让窗口在所有 App 之上、切换 App 不被隐藏、且**任意 App 前台时单击即生效**。
 
     Qt 的 WindowStaysOnTopHint 在 macOS 仅把窗口设为 NSFloatingWindowLevel（浮层），
     但 Qt.Tool 会被映射成 NSPanel；AppKit 默认在应用失活(hidesOnDeactivate)时隐藏面板，
@@ -54,6 +54,11 @@ def _apply_macos_always_on_top(widget):
     # 台前调度豁免：桌宠必须留在舞台上，切 App / 舞台重排都不能把它收走
     # （不动层级：上面的浮层层级已经设过，这里只补窗口行为）
     apply_stage_exempt(widget, tag="PetWindow")
+    # 单击即生效（2026-09-21）：AppKit 默认吞掉「非 key 窗口」的首次点击（只用来激活本
+    # App），而桌宠几乎总是在别的 App 前台时被点击 —— 最典型的就是闹钟响铃时点人物想
+    # 停播报，mouseReleaseEvent 收不到 → _on_click 不执行 → 播报停不下来。
+    # 覆盖 acceptsFirstMouse: 返回 YES 后，这一次点击同时完成「激活 + 投递」。
+    enable_first_mouse(widget, tag="PetWindow")
 
 
 EMOJIS = [

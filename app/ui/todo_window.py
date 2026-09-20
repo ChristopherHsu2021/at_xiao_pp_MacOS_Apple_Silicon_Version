@@ -29,7 +29,8 @@ from app.ui.common import (
     PeekCard, NoticeDialog, promote_popup_topmost,
     EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui,
 )
-from app.ui.screen_fit import fit_window, scale_qss, s
+from app.ui.screen_fit import fit_window, scale_qss, s, WINDOW_DEFAULTS
+from app.ui.mac_window import apply_stage_exempt
 from app.ui.context_menu import ActionPopupMenu, ACTION_POPUP_QSS
 from app.ui.rich_editor import RichEditor, svg_icon
 
@@ -307,6 +308,10 @@ class ElideLabel(QLabel):
         self._extra_tip = ""     # 附加 hover 提示（如 TodoDock 的「提醒时间：年-月-日 时:分」）
         self._offset = 0.0
         self._hover = False
+        # 是否由「外部」驱动 hover（macOS 桌面挂件 TodoDock：App 非激活时 Qt 根本不派发
+        # hover，见 app/ui/todo_dock.py 的「hover」小节）。外部接管时忽略原生 enter/leave，
+        # 并关掉原生 tooltip（提示改由挂件自绘卡片给出），避免两套 hover 互相打架。
+        self._external_hover = False
         self._done = False
         self._anim = QPropertyAnimation(self, b"offset", self)
         self._anim.setDuration(0)
@@ -346,7 +351,64 @@ class ElideLabel(QLabel):
         self._extra_tip = text or ""
         self._refresh_tooltip()
 
+    def hover_tip_text(self):
+        """hover 提示全文（提醒时间 + 标题全文）：原生 tooltip 与挂件自绘提示卡共用。"""
+        return "\n".join(p for p in (self._extra_tip, self._full) if p)
+
+    def has_hover_info(self):
+        """hover 是否「有额外信息可给」：有附加提示（提醒时间）或标题被省略。
+
+        用于桌面挂件：没有额外信息时不再弹提示卡（避免把原文重复显示一遍、糊住桌面）。
+        """
+        if self._extra_tip:
+            return True
+        return self.fontMetrics().horizontalAdvance(self._full) > self._available()
+
+    def set_external_hover_owner(self, external):
+        """把本标签的 hover 交给外部驱动（桌面挂件轮询）。
+
+        - 外部接管：关掉原生 mouseTracking 与原生 tooltip（提示由挂件自绘卡片给出）。
+        - 交还原生：恢复 mouseTracking 并按 _extra_tip/_full 重挂 tooltip。
+        """
+        self._external_hover = bool(external)
+        if self._external_hover:
+            self.setMouseTracking(False)
+            self.setToolTip(None)
+        else:
+            self.setMouseTracking(True)
+            self._refresh_tooltip()
+
+    def set_hovered(self, on):
+        """hover 状态的**唯一入口**：原生 enter/leave 与外部轮询都走这里。
+
+        统一入口是必须的：挂件上「Qt 原生 hover」与「挂件轮询 hover」都可能触发，
+        若各自改 _hover / 各自启停动画，两者会在边界处互相打断（跑马灯反复重启动）。
+        """
+        on = bool(on)
+        if on == self._hover:
+            return
+        self._hover = on
+        if on:
+            full_w = self.fontMetrics().horizontalAdvance(self._full)
+            avail = self._available()
+            if full_w > avail and avail > 0:
+                max_off = full_w - avail
+                self._anim.stop()
+                # 时长随超长幅度增长（缓一点便于阅读），封顶 6s
+                self._anim.setDuration(max(1200, min(6000, int(max_off * 6))))
+                self._anim.setStartValue(0.0)
+                self._anim.setEndValue(float(max_off))
+                self._anim.setEasingCurve(QEasingCurve.Type.Linear)
+                self._anim.start()
+        else:
+            self._anim.stop()
+            self._offset = 0.0
+        self.update()
+
     def _refresh_tooltip(self):
+        if self._external_hover:
+            self.setToolTip(None)      # 外部接管：提示改由挂件自绘提示卡给出
+            return
         parts = [p for p in (self._extra_tip, self._full) if p]
         self.setToolTip("\n".join(parts) if parts else None)
 
@@ -398,26 +460,14 @@ class ElideLabel(QLabel):
         painter.drawLine(int(x0), int(y), int(x0 + text_w), int(y))
 
     def enterEvent(self, event):  # noqa: N802
-        self._hover = True
-        fm = self.fontMetrics()
-        full_w = fm.horizontalAdvance(self._full)
-        avail = self._available()
-        if full_w > avail and avail > 0:
-            max_off = full_w - avail
-            self._anim.stop()
-            # 时长随超长幅度增长（缓一点便于阅读），封顶 6s
-            self._anim.setDuration(max(1200, min(6000, int(max_off * 6))))
-            self._anim.setStartValue(0.0)
-            self._anim.setEndValue(float(max_off))
-            self._anim.setEasingCurve(QEasingCurve.Type.Linear)
-            self._anim.start()
+        # 唯一入口：外部接管（桌面挂件轮询）时忽略原生 hover，避免两套状态互相打断
+        if not self._external_hover:
+            self.set_hovered(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event):  # noqa: N802
-        self._hover = False
-        self._anim.stop()
-        self._offset = 0.0
-        self.update()
+        if not self._external_hover:
+            self.set_hovered(False)
         super().leaveEvent(event)
 
 
@@ -1182,24 +1232,50 @@ class TodoWindow(QDialog):
 
         2026-09-21 需求：按钮宽度减小，让各语言下的标题（任务清单 / 任務清單 / Task List）
         完整显示。原实现固定 62/68px，四个按钮 + 间距 + 页边距把 352px 窗口挤到标题只剩
-        ~46px → 「任务清单」被截断。这里按按钮实际字号（QSS 的 font-size 已随全局 80% 缩放）
-        量出最长标签所需宽度，中/繁/英三语都刚好够用，不再写死。
+        ~46px → 「任务清单」被截断。
+
+        2026-09-21 二次修正（用户反馈「『添加』两字显示不全」）：
+        原实现用「统一公式 文本宽 + 2*s(13)」算宽度，**忽略了四个按钮的内边距并不相同**——
+        ``QPushButton#todoPrimary`` 是 ``padding: 0 14px``，``todoSecondary/todoDanger`` 是
+        ``padding: 0 10px``（见 WINDOW_QSS）。四个按钮被强行设成同一宽度后，主按钮「添加」
+        的内容区比其它按钮窄 2*s(4)≈6.4px，于是只有它被裁掉半边字；英文（Delete 最长）还会
+        因测量字体不是粗体（QSS 是 font-weight:700）而低估宽度。
+
+        现改为**直接问 Qt 要 sizeHint**：QStyleSheetStyle 会把该按钮自己的 QSS 字号 +
+        内边距 + 边框 + 文本宽度全部算进去，主/次按钮各自准确，将来改 QSS 也自动跟随。
+        sizeHint 会写下固定宽度约束，所以调用前先复位 min/max，保证可重复调用（切语言）。
         """
-        btn_font = self.sel_all.font()
-        btn_font.setPixelSize(s(12))          # 同 WINDOW_QSS 中 todoSecondary/todoPrimary 的 font-size
-        bfm = QFontMetrics(btn_font)
-        labels = (self.sel_all.text(), self.add_b.text(), self.del_b.text(), self.back_b.text())
-        need = max(bfm.horizontalAdvance(t) for t in labels) + 2 * s(13)
-        # 上限不超过原设计（62 / 英文 68 的缩放值）；下限保证点击热区
-        cap = s(68) if config.settings.get("language") == "en" else s(62)
-        w = max(s(48), min(cap, need))
-        for b in (self.sel_all, self.add_b, self.del_b, self.back_b):
-            b.setFixedWidth(w)
+        btns = (self.sel_all, self.add_b, self.del_b, self.back_b)
+        for b in btns:
+            # 复位上一次 setFixedWidth 留下的约束，否则 sizeHint 会直接返回旧宽度（自锁）
+            b.setMinimumWidth(0)
+            b.setMaximumWidth(16777215)          # QWIDGETSIZE_MAX
+        # 每个按钮按自己的 QSS 内边距算；取四者最大值 → 四个按钮等宽且都不裁字
+        need = max(b.sizeHint().width() for b in btns)
+        # ★ 保险余量（别删）：主按钮「添加」的 sizeHint 与「文字宽 + 内边距」几乎贴平
+        #   （实测内容区宽 == 文字宽，零余量）。而 Windows 微软雅黑与 macOS PingFang SC
+        #   的汉字步进并不完全相同，零余量在 mac 上会再次裁掉半个字。留 ~6px 冗余。
+        slack = int(round(s(8)))
+        w = max(int(round(s(48))), int(need) + slack)   # 下限保证点击热区
         # 标题保底宽度：任何语言下「📋 任务清单」都完整可见（布局优先满足它）
         title_font = self.title_label.font()
         title_font.setPixelSize(s(15))        # 同 QLabel#window-title 的 font-size
         tfm = QFontMetrics(title_font)
-        self.title_label.setMinimumWidth(tfm.horizontalAdvance(self.title_label.text()) + s(4))
+        title_min = tfm.horizontalAdvance(self.title_label.text()) + s(4)
+        self.title_label.setMinimumWidth(title_min)
+        # ★ 最后夹一道：保证「4 按钮 + 3 间距 + 页边距 + 标题保底」不超出设计宽度。
+        #   否则英文（Delete 最长）在 macOS 字体下变宽时，固定宽按钮会把标题挤出窗口。
+        #   用 WINDOW_DEFAULTS 的设计宽而非 self.header.width()：本方法在构造期被调用，
+        #   那时 header 还没被布局赋予真实宽度，读它会得到无效值。
+        layout = self.header.layout()
+        if layout is not None:
+            m = layout.contentsMargins()
+            design_w = WINDOW_DEFAULTS.get("todo_list", (352, 368))[0]
+            budget = design_w - m.left() - m.right() - layout.spacing() * (len(btns) - 1) - title_min
+            if budget > 0:
+                w = min(w, max(int(round(s(48))), budget // len(btns)))
+        for b in btns:
+            b.setFixedWidth(int(w))
 
     def _bar_press(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -1568,6 +1644,10 @@ STICKY_COLORS = [
     ("粉", "#ffe8ec"),
 ]
 
+# 便签默认背景色（= STICKY_COLORS 的「主题色」）。持久化在 todos.json 的 bg 字段，
+# 打开便签时读回；未设置过的老任务按此默认值渲染。
+STICKY_DEFAULT_BG = "#fffaf5"
+
 # 便签右键菜单：只负责「便签自定义项」，编辑动作块与整体样式复用 app/ui/common.py 的
 # EditContextMenu（两处右键菜单同源，避免再次出现样式/功能不一致）。
 
@@ -1738,7 +1818,7 @@ class StickyNoteWindow(QWidget):
         self._done = bool(task.get("done", False))
         self._prio = task.get("priority") or "中"   # 供左上角优先级呼吸灯取色
         self._rotate = 0
-        self._bg = QColor("#fffaf5")  # 软件主题米色（默认背景）
+        self._bg = QColor(STICKY_DEFAULT_BG)  # 软件主题米色（默认背景，实际值下面 set_bg 读回）
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                            | Qt.WindowType.WindowStaysOnTopHint)
@@ -1755,7 +1835,9 @@ class StickyNoteWindow(QWidget):
         self._build_grips()
         # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
         fit_window(self, "sticky", resizable=True, max_size=(1100, 900))
-        self.set_bg("#fffaf5")
+        # 便签背景色持久化（2026-09-21 修 Bug）：读回该任务上次选的色；
+        # 没设置过则用默认主题米色。persist=False —— 初始化不该写库。
+        self.set_bg(task.get("bg") or STICKY_DEFAULT_BG, persist=False)
         # 打开便签时立即载入该任务的真实标题与富文本内容（修复：之前永远显示占位符）
         self.title.setText(task.get("title", "") or "")
         self.editor.set_html(task.get("content", ""))
@@ -1876,6 +1958,8 @@ class StickyNoteWindow(QWidget):
     # ---------- 显示后重新同步几何（消除初始底部裁切） ----------
     def showEvent(self, e):  # noqa: N802
         super().showEvent(e)
+        # macOS：便签卡片同样必须免除台前调度管理（否则切 App 时便签会被收进左侧缩略图条）
+        apply_stage_exempt(self, tag="StickyNoteWindow")
         # 初次显示时布局尚未稳定，self.note 的最小尺寸会偏高（~404）把卡片顶出窗口、
         # 裁掉底部工具栏；待布局稳定后重新同步几何，让卡片恰好铺满窗口、不被裁剪。
         QApplication.processEvents()
@@ -2017,11 +2101,21 @@ class StickyNoteWindow(QWidget):
         return svg_icon("close", 20, "#EF4444" if hovered else "#6B7280")
 
     # ---------- 背景色 ----------
-    def set_bg(self, color):
-        self._bg = QColor(color)
+    def set_bg(self, color, persist=True):
+        """设置便签背景色并（默认）持久化，修复「关闭再打开又变回默认色」。
+
+        - ``color`` 为空/非法时回退默认主题色。
+        - ``persist=False`` 只用于 __init__ 里的「读回上次颜色」——避免刚打开便签
+          就无谓地写一次 todos.json；用户主动选色（右键色板）走默认 persist=True。
+        """
+        self._bg = QColor(color or STICKY_DEFAULT_BG)
+        if not self._bg.isValid():
+            self._bg = QColor(STICKY_DEFAULT_BG)
         # HTML rounded-lg = 8px
         self.note.setStyleSheet(scale_qss(
             f"QWidget#stickyNote{{background:{self._bg.name()};border-radius:8px;}}"))
+        if persist:
+            todo.set_bg(self.task_id, self._bg.name())
 
     # ---------- 右键菜单 ----------
     def _show_sticky_menu(self, event, target=None):
@@ -2035,7 +2129,8 @@ class StickyNoteWindow(QWidget):
         返回新建任务的 id，便于调用方（如测试/联动）定位。"""
         title = self.title.text().strip() or tr("未命名")
         content_html = self.editor.to_html()
-        new_task = todo.add(title, content_html, remind=None, alarm_id=None, priority="中")
+        new_task = todo.add(title, content_html, remind=None, alarm_id=None, priority="中",
+                            bg=self._bg.name())      # 复制任务沿用当前背景色
         self.todo_window._render()              # 任务清单同步新增条目
         # base=self：新便签相对当前这张错开摆放，避免完全重叠让人以为没复制
         self.todo_window.open_sticky(new_task, base=self)

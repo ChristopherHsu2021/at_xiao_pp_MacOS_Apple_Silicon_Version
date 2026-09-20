@@ -47,7 +47,7 @@ from app.ui.tray import TrayManager
 from app.ui.music_player import MusicPlayer
 from app.ui.todo_window import TodoWindow
 from app.ui.todo_dock import TodoDock
-from app.ui.mac_window import apply_stage_exempt
+from app.ui.mac_window import apply_stage_exempt, iter_exempt_candidates
 from app.ui.alarm_window import AlarmWindow
 from app.ui.timer_window import TimerWindow
 from app.ui.settings_window import SettingsWindow
@@ -271,35 +271,29 @@ class App:
 
     # ---------------- macOS：台前调度豁免（全软件统一兜底）----------------
     def _apply_mac_stage_exemption(self):
-        """macOS 专属：本程序所有可见顶层窗口都不被台前调度收走。
+        """macOS 专属：本程序**所有**可见顶层窗口都不被台前调度收走。
 
-        卡片窗口（待办/闹钟/计时/设置/场景/播放器）与桌面挂件（桌宠/TodoDock/
-        歌词浮窗）都只补「窗口行为」—— CanJoinAllApplications + Stationary +
-        CanJoinAllSpaces + FullScreenAuxiliary + IgnoresCycle + 失活不隐藏，
-        **不动层级**，现有的置顶 / 让路（keep_on_top / release_topmost）语义照旧。
-        定时器每 1.5s 与激活状态变化时重申，覆盖新开窗口与 Qt 重建原生窗口的情况
-        （幂等，见 app/ui/mac_window.py）。
+        2026-09-21 强化（用户要求「整个软件系统完全、一点也不能受台前调度影响」）：
+        由「写死的窗口清单」改为 ``QApplication.topLevelWidgets()`` **全量枚举** ——
+        便签卡片、消息框、预览卡、安装器等一切窗口（含将来新增的）都自动覆盖，
+        不再有任何漏网窗口被 Stage Manager 缩进左侧「最近使用的 App」条。
+
+        只补「窗口行为」—— CanJoinAllApplications + Stationary + CanJoinAllSpaces +
+        FullScreenAuxiliary + IgnoresCycle + 失活不隐藏，**不动层级**，
+        现有的置顶 / 让路（keep_on_top / release_topmost）与 TodoDock 的
+        「悬停抬层」语义都保持原样。瞬时窗口（Popup/ToolTip）已由
+        ``mac_window.iter_exempt_candidates`` 排除。
+
+        调用时机恰好覆盖 Stage Manager 的生效点：① ``applicationStateChanged``
+        （切 App 时系统马上重新分舞台）；② 1.5s 周期定时器（兜住新开窗口）。
         """
         if sys.platform != "darwin":
             return
         try:
-            for w in self._exempt_widgets():
-                if w is not None and w.isVisible():
-                    apply_stage_exempt(w, tag=type(w).__name__)
+            for w in iter_exempt_candidates():
+                apply_stage_exempt(w, tag=type(w).__name__)
         except Exception:  # noqa: BLE001
             pass
-
-    def _exempt_widgets(self):
-        """需要台前调度豁免的本程序窗口（不含瞬时弹窗，避免误伤）。"""
-        widgets = [self.pet, self.scene, getattr(self, "todo_dock", None)]
-        widgets += list(self.windows.values())
-        music_window = getattr(self.music, "window", None)
-        if music_window is not None:
-            widgets.append(music_window)
-        lyric = getattr(self.music, "lyric_overlay", None)
-        if lyric is not None:
-            widgets.append(lyric)
-        return widgets
 
     def begin_popup_menu(self):
         self._popup_menu_open = True

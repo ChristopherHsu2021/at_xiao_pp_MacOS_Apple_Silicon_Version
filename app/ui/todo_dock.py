@@ -39,6 +39,31 @@ macOS 显示逻辑（与 Windows 分叉，见 app/ui/mac_window.py）：
   这两点踩错会让窗口既不显示也点不动（详见 mac_window.install_hit_test_router）。
 - 兜底：若 Objective-C runtime 注入失败，退回 Qt 的 WA_TransparentForMouseEvents 粒度方案
   （容器层透明、交互子控件保持可点），至少保证可交互（空白仅被本窗口吞掉、不穿透桌面）。
+
+hover 与「任意 App 都要能点/能 hover」（2026-09-21 需求，本节是唯一权威说明）
+-----------------------------------------------------------------------------
+现象：用户反馈「不管鼠标焦点在哪个应用，TodoDock 都应该能触发点击或 hover」——
+在别的 App 前台时，挂件既不会高亮、也点不动。
+
+根因有两条，必须一起解决：
+1. **Qt 在 macOS 上不给非激活 App 派发 hover**。Qt 官方行为（QTBUG-100932）：
+   ``NSTrackingArea`` 只在 ``NSApplication`` 为激活态时才把 mouseEntered/mouseExited
+   转成 Qt 的 enterEvent/leaveEvent。挂件的常态就是「别的 App 在前台」，于是
+   ElideLabel 的原生 hover（标题跑马灯 + tooltip）永远不触发。
+   → 解法：挂件**自己轮询光标**（``QTimer`` + ``QCursor.pos()``），算出落在哪一行，
+     主动调 ``ElideLabel.set_hovered()``。为避免与原生 hover 打架，行内标签一律
+     ``set_external_hover_owner(True)``（关掉原生 mouseTracking 与原生 tooltip，
+     提示改由挂件自绘卡片给出）。详见 TodoDock._poll_hover。
+2. **macOS 不向被覆盖的窗口投递鼠标事件**（与 Windows 的 WM_NCHITTEST 模型不同）。
+   挂件若长期待在普通层（NSNormalWindowLevel），别的 App 窗口一盖上来就同时失去
+   hover 与 click；但长期待在浮层（NSFloatingWindowLevel）又会一直盖住别人的界面
+   ——上一轮用户明确反对（「不遮挡住其他应用或界面的显示」）。
+   → 解法：**动态层级**。轮询里发现光标进入挂件矩形 → 抬到浮层（此时才盖住别人、
+     也才收得到鼠标）；光标离开 → 落回普通层（不再遮挡任何界面）。空白区穿透仍由
+     hitTest 路由保证，所以抬层期间挂件矩形内的「空白」依然把点击让给下层窗口。
+     实现见 ``mac_window.set_window_level``（只改 level，不动 collectionBehavior）。
+
+两条合起来即为「光标到哪儿，挂件就在哪儿可点可 hover；光标一走，挂件就不挡人」。
 """
 
 import sys
@@ -46,7 +71,8 @@ import sys
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QScrollArea, QApplication,
 )
-from PyQt6.QtCore import Qt, QPoint, QRect, QTimer
+from PyQt6.QtCore import Qt, QPoint, QRect, QRectF, QTimer
+from PyQt6.QtGui import QCursor, QColor, QFont, QFontMetrics, QPainter, QPen
 
 from app.core import todo
 from app.core.i18n import tr
@@ -54,6 +80,7 @@ from app.ui.todo_window import TaskRow, LIST_WINDOW_SIZE   # noqa: F401  (LIST_W
 from app.ui.screen_fit import scale_qss, s
 from app.ui.mac_window import (
     IS_MAC, apply_desktop_widget_style, install_hit_test_router, mac_log,
+    set_window_level,
 )
 
 
@@ -81,6 +108,61 @@ _DOCK_VPAD = s(10)           # 挂件容器上下留白
 _DOCK_TITLE_GAP = s(10)
 _DOCK_VISIBLE_ROWS = 5   # 可视区固定显示 5 条任务，多出来的靠滚动查看
 
+# ---- hover 轮询参数（见模块头部「hover」小节）----
+_HOVER_POLL_MS = 40      # 25Hz：足够跟手，又不至于明显吃 CPU（每次轮询只读一次光标坐标）
+_TIP_MAX_W = s(260)      # 自绘 hover 提示卡的最大宽度（超出自动换行）
+
+
+class _DockHoverTip(QWidget):
+    """桌面挂件自绘的 hover 提示卡（替代 Qt 原生 tooltip）。
+
+    为什么不用 ``setToolTip``：原生 tooltip 由 Qt 自己管理显隐时机，而它的显隐同样依赖
+    「原生 hover」——正是 macOS 在 App 非激活时不派发的那种事件。挂件改为光标轮询后，
+    提示必须由轮询**显式驱动**，所以自带一个窗口：ToolTip 类型 + 不抢焦点 + 鼠标穿透
+    （``WindowTransparentForInput`` → macOS setIgnoresMouseEvents），永远不干扰点击。
+
+    样式与 App 右键菜单同源：暖米白卡片 + 8px 圆角 + 细白描边，正文 #3d2b1f。
+    """
+
+    def __init__(self):
+        super().__init__(None)
+        self.setWindowFlags(
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+            | Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self._text = ""
+        font = QFont(self.font())
+        font.setPixelSize(max(10, int(round(s(12)))))
+        self.setFont(font)
+
+    def text(self):
+        return self._text
+
+    def set_text(self, text):
+        """按文本量出卡片尺寸（自动换行，宽度上限 _TIP_MAX_W）。"""
+        self._text = text or ""
+        pad = int(round(s(10)))
+        fm = QFontMetrics(self.font())
+        flags = int(Qt.TextFlag.TextWordWrap)
+        rect = fm.boundingRect(0, 0, int(_TIP_MAX_W), 10000, flags, self._text)
+        self.resize(rect.width() + pad * 2, rect.height() + pad * 2)
+
+    def paintEvent(self, _e):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(QColor(255, 255, 255, 235), 1))
+        p.setBrush(QColor(255, 250, 245, 248))
+        p.drawRoundedRect(r, s(8), s(8))
+        pad = int(round(s(10)))
+        p.setPen(QColor("#3d2b1f"))
+        p.drawText(self.rect().adjusted(pad, pad, -pad, -pad),
+                   int(Qt.TextFlag.TextWordWrap), self._text)
+
 
 class TodoDock(QWidget):
     """左上角固定的全透明任务清单挂件（macOS 原生选择性点击穿透）。"""
@@ -89,6 +171,10 @@ class TodoDock(QWidget):
         super().__init__()
         self.ctx = ctx
         self._wa_fallback = False   # 是否退化为 Qt 粒度穿透方案（_render 需补挂属性）
+        self._rows = []             # 缓存的 TaskRow 列表（hover 轮询每 40ms 用，不能每次 findChildren）
+        self._hover_row = None      # 当前光标命中的行（用于自绘 hover 高亮）
+        self._tip = None            # 自绘 hover 提示卡（首次需要时才建）
+        self._floating = None       # 当前是否处于浮层（None = 尚未设置，见 _ensure_level）
         # 仅无边框；不设置 WindowStaysOnTopHint —— 不强制置顶，点击其它软件时本窗口
         # 不会被隐藏，只是层级上可被其它窗口覆盖（满足「必须显示 + 其它软件可更高」）。
         # macOS 额外加 Qt.Tool（→ NSPanel 浮层面板）：普通 NSWindow 会被台前调度
@@ -110,11 +196,19 @@ class TodoDock(QWidget):
         if IS_MAC:
             # macOS 显示逻辑：登记为「桌面挂件」，不受台前调度 / 空间切换影响。
             self._apply_mac_outer_style()
+            # hover + 动态层级：见模块头部「hover」小节（App 非激活时 Qt 不派发 hover，
+            # 且被覆盖的窗口收不到鼠标 → 只能自己轮询光标，并按需抬层/落层）。
+            self._poll_timer = QTimer(self)
+            self._poll_timer.setInterval(_HOVER_POLL_MS)
+            self._poll_timer.timeout.connect(self._poll_hover)
+            self._poll_timer.start()
             app = QApplication.instance()
             if app is not None:
                 # 切 App / 台前调度重新分舞台后重申一次挂件语义（幂等，开销极小）。
                 # 用绑定方法而非 lambda：挂件销毁时 PyQt 会自动断开，避免退出期回调野指针。
                 app.applicationStateChanged.connect(self._on_app_state_changed)
+        else:
+            self._poll_timer = None
 
     # ---------------- 平台接入：点击穿透 / macOS 显示逻辑 ----------------
     def _install_click_through(self):
@@ -141,26 +235,159 @@ class TodoDock(QWidget):
     def _apply_mac_outer_style(self, verbose=True):
         """macOS 专属显示逻辑：不受台前调度影响（见 app/ui/mac_window.py 顶部说明）。
 
-        层级取舍（2026-09-21 实测定稿，别再改回去）：
-        - NSFloatingWindowLevel（floating=True）：挂件永远压在所有 App 窗口之上，
-          文字会盖住其它软件界面（用户意见「不遮挡住其他应用或界面的显示」）。
-        - 桌面层（level="desktop" / kCGDesktopIconWindowLevel）：试过，**不可用** ——
-          实测挂件内容被系统画成半透明发虚，而且被 Finder 的桌面窗口吃掉全部鼠标事件，
-          变成「完全无法点击」。
-        - 现用 NSNormalWindowLevel（floating=False）：层级与普通窗口一致，
-          其它 App 被激活时其窗口自然升到挂件之上（不再遮挡），桌面/本程序前台时
-          挂件可见可点；配合 collectionBehavior 仍常驻所有空间、不被台前调度收走。
-          再叠加 acceptsFirstMouse: → 非激活状态下也能单击即生效。
+        层级策略（2026-09-21 更新，是「动态层级」，不要退回任何静态方案）：
+        - NSFloatingWindowLevel 常驻（floating=True）：永不遮挡需求被否 —— 文字会长期
+          盖在其它软件界面上（用户意见「不遮挡住其他应用或界面的显示」）。
+        - 桌面层（level="desktop" / kCGDesktopIconWindowLevel）：实测**不可用** ——
+          内容被系统合成成半透明发虚，且被 Finder 桌面窗口吃掉全部鼠标事件
+          → 挂件完全无法点击。
+        - 因此这里只把**基准层级**设为 NSNormalWindowLevel；真正的层级由
+          ``_ensure_level`` 在 40ms 轮询里动态切换：
+            光标在挂件上 → LEVEL_FLOATING（否则 macOS 不给被覆盖窗口投递鼠标，
+                             hover/点击全失效 —— 用户「任意应用都要能点/能 hover」）
+            光标离开     → LEVEL_NORMAL（不遮挡任何界面）
+          本方法会在切 App 时被调用，故顺手把 _floating 复位为 False（与 NORMAL 一致），
+          让轮询下一拍自行纠正（幂等、无竞态：两者都只是写同一个 level）。
         """
         if not IS_MAC:
             return False
-        return apply_desktop_widget_style(
+        ok = apply_desktop_widget_style(
             self, floating=False, tag="TodoDock", verbose=verbose
         )
+        if ok:
+            self._floating = False
+        return ok
 
     def _on_app_state_changed(self, _state):
         """应用激活状态变化（切 App / 台前调度重新分舞台）→ 重申挂件语义。"""
         self._apply_mac_outer_style(verbose=False)
+
+    # ---------------- hover + 动态层级（模块头部「hover」小节）----------------
+    def _poll_hover(self):
+        """每 40ms 一次：把「Qt 在 App 非激活时不派发 hover」与「被覆盖窗口收不到鼠标」
+        两个 macOS 限制一起绕过去。
+
+        顺序很重要：**先按光标位置调整层级，再判定命中行** —— 抬层本身不影响本函数的
+        判定（命中用的是全局光标坐标 + 挂件几何，与窗口层级无关），但抬层必须尽早发生，
+        用户真正点击时窗口才已经在上层。
+        """
+        if not self.isVisible():
+            return
+        try:
+            pos = QCursor.pos()
+            local = self.mapFromGlobal(pos)
+            inside = self.rect().contains(local)
+            self._ensure_level(inside)
+            row = self._row_at(local) if inside else None
+            if row is not self._hover_row:
+                self._set_hover_row(row)
+            label = getattr(row, "text", None) if row is not None else None
+            if label is not None and label.has_hover_info():
+                self._show_tip(label.hover_tip_text(), pos)
+            else:
+                self._hide_tip()
+        except Exception:  # noqa: BLE001
+            # 轮询跑在 Qt 定时器里；任何异常都不能冒泡（虚函数/定时器里逃逸的异常会
+            # 触发 PyQt6 的 qFatal → 整个 App abort，同类坑见 common.guard_ui）。
+            self._hide_tip()
+
+    def _ensure_level(self, inside):
+        """光标在挂件上 → 浮层（可收鼠标）；离开 → 普通层（不遮挡其它应用）。
+
+        仅 darwin 生效，且只在状态真正变化时才发 objc 消息（``set_window_level`` 幂等）。
+        """
+        if not IS_MAC:
+            return
+        want = bool(inside)
+        if self._floating is want:
+            return
+        if set_window_level(self, want, tag="TodoDock"):
+            self._floating = want
+
+    def _row_at(self, local):
+        """命中测试：光标（挂件本地坐标）落在哪一行。用整行矩形，比只判文字更宽容。"""
+        for row in self._rows:
+            try:
+                if row is None or not row.isVisible():
+                    continue
+                top_left = row.mapTo(self, QPoint(0, 0))
+                if QRect(top_left, row.size()).contains(local):
+                    return row
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
+    def _set_hover_row(self, row):
+        """切换命中行：旧行复位、新行进入 hover（唯一入口，避免两套 hover 状态打架）。"""
+        prev = self._hover_row
+        self._hover_row = row
+        if prev is not None:
+            try:
+                prev.text.set_hovered(False)
+            except Exception:  # noqa: BLE001
+                pass
+        if row is not None:
+            try:
+                row.text.set_hovered(True)
+            except Exception:  # noqa: BLE001
+                pass
+        self.update()            # 重绘行 hover 高亮（见 paintEvent）
+
+    def _show_tip(self, text, global_pos):
+        """在挂件右侧弹出自绘提示卡（提醒时间 / 被省略的标题全文）。"""
+        tip = self._tip
+        if tip is None:
+            tip = _DockHoverTip()
+            self._tip = tip
+        if tip.text() != text:
+            tip.set_text(text)
+        geo = self.geometry()
+        screen = QApplication.screenAt(global_pos) or QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen is not None else geo
+        gx = geo.right() + int(round(s(8)))
+        gy = global_pos.y() - tip.height() // 2
+        if gx + tip.width() > avail.right():
+            # 右侧放不下 → 退到光标左侧
+            gx = max(avail.left(), global_pos.x() - tip.width() - int(round(s(12))))
+        gy = max(avail.top(), min(gy, avail.bottom() - tip.height()))
+        tip.move(int(gx), int(gy))
+        if not tip.isVisible():
+            tip.show()
+        tip.raise_()
+        # 提示卡是瞬时窗口，不参与台前调度豁免 → 需手动抬到浮层，否则会被别的 App 盖住
+        if IS_MAC and self._floating:
+            set_window_level(tip, True, tag="TodoDockTip")
+
+    def _hide_tip(self):
+        tip = self._tip
+        if tip is None or not tip.isVisible():
+            return
+        tip.hide()
+        if IS_MAC:
+            set_window_level(tip, False, tag="TodoDockTip")
+
+    # ---------------- 自绘 hover 高亮 ----------------
+    def paintEvent(self, _e):  # noqa: N802
+        """给命中行铺一层淡暖橙底（在子控件之下渲染，不影响任何既有样式）。
+
+        没有这一层时，「标题放得下 + 无提醒时间」的行 hover 起来毫无视觉反馈，
+        用户会再次认为「hover 没效果」。
+        """
+        row = self._hover_row
+        if row is None:
+            return
+        try:
+            top_left = row.mapTo(self, QPoint(0, 0))
+            r = QRectF(QRect(top_left, row.size())).adjusted(
+                -s(2), s(1), s(2), -s(1)
+            )
+        except Exception:  # noqa: BLE001
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(249, 117, 16, 30))
+        p.drawRoundedRect(r, s(8), s(8))
 
     # ---------------- 构建 ----------------
     def _build(self):
@@ -223,6 +450,9 @@ class TodoDock(QWidget):
         self._render()
 
     def _render(self):
+        # 行即将被销毁：先把 hover 状态清干净（_hover_row 会变成悬垂引用）
+        self._hover_row = None
+        self._hide_tip()
         while self.list_lay.count():
             item = self.list_lay.takeAt(0)
             w = item.widget()
@@ -258,6 +488,15 @@ class TodoDock(QWidget):
         # （否则行被拉高、内容垂直居中 → 头部与首条任务之间凭空多出一段空白）
         self.list_lay.addStretch(1)
         self._fit_height()
+        # 缓存行列表：hover 轮询每 40ms 跑一次，绝不能每次都 findChildren 遍历控件树
+        self._rows = list(self.list_widget.findChildren(TaskRow))
+        # 行内标签一律交给挂件轮询驱动 hover：关掉原生 mouseTracking 与原生 tooltip
+        # （macOS 在 App 非激活时根本不派发原生 hover，留着只会与轮询打架）。
+        for row in self._rows:
+            try:
+                row.text.set_external_hover_owner(True)
+            except Exception:  # noqa: BLE001
+                pass
         # 兜底穿透方案的属性挂在「行控件」上，_render 重建行后必须重新补挂，
         # 否则刷新出来的行会吞掉鼠标事件（原生 hitTest 方案无此问题）。
         if self._wa_fallback:
@@ -375,6 +614,29 @@ class TodoDock(QWidget):
         if IS_MAC:
             self._apply_mac_outer_style()
         self._install_click_through()
+        # 恢复 hover 轮询（隐藏期间已停，见 hideEvent）
+        if self._poll_timer is not None and not self._poll_timer.isActive():
+            self._poll_timer.start()
+
+    def hideEvent(self, e):  # noqa: N802
+        # 挂件看不见时没有任何可交互区域：停掉 40ms 轮询（避免空转吃 CPU），
+        # 并收起提示卡、复位 hover（否则下次显示时残留旧高亮）。
+        super().hideEvent(e)
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+        self._hide_tip()
+        if self._hover_row is not None:
+            self._set_hover_row(None)
+
+    def closeEvent(self, e):  # noqa: N802
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+        tip = self._tip
+        if tip is not None:
+            tip.hide()
+            tip.deleteLater()
+            self._tip = None
+        super().closeEvent(e)
 
     def retranslate_ui(self):
         self.title.setText("📋 " + tr("任务清单"))

@@ -2,6 +2,22 @@
 
 优先播放预生成语音；没有预生成音频时使用 Windows SAPI5。
 语音在独立工作线程里执行，避免阻塞界面主线程。
+
+**可中断播放（2026-09-21 修「点击人物无法暂停闹钟播报」）**
+-----------------------------------------------------------
+所有播放在 VoiceWorker 线程里都是阻塞式的（macOS 的 say / afplay、Windows 的
+winsound.PlaySound、SAPI.WaitUntilDone(-1)）。而 stop_speaking() 只是往该线程投一个
+队列信号（request_stop）——线程正卡在阻塞调用里，信号必须等这段播放返回后才被处理，
+表现即「点了人物没反应、闹钟播报停不下来」。
+
+解法：把「停止」从线程队列里解放出来，做成**跨线程立即生效**：
+  ① 代次（generation）标记 —— 任何一次 stop 都让「当前这一代」失效，
+     所有等待循环都在轮询它，立刻跳出；
+  ② 子进程句柄登记 —— stop 时直接 terminate 掉 say / afplay 子进程，
+     不依赖工作线程调度（哪怕它被饿死也照样立刻静音）。
+
+约定（新增阻塞播放务必遵守）：**不要直接 subprocess.run(...)**，一律
+``Popen`` + ``_begin_play`` + ``_wait_proc``，否则会重新引入「停不下来」的老问题。
 """
 
 import os
@@ -9,6 +25,7 @@ import json
 import hashlib
 import subprocess
 import sys
+import threading
 import time
 import tempfile
 import wave
@@ -31,6 +48,99 @@ try:
 except Exception:  # noqa: BLE001
     winsound = None
     _HAS_WINSOUND = False
+
+
+# ---------------------------------------------------------------------------
+# 可中断播放基础设施（见模块头部说明）
+# ---------------------------------------------------------------------------
+_STOP_LOCK = threading.Lock()
+_PLAY_GEN = 0               # 播放代次：每 stop 一次 +1，正在播的那一代立即失效
+_CURRENT_PROC = None        # 当前正在播放的子进程（say / afplay）
+_WAIT_SLICE = 0.05          # 等待循环粒度（50ms）= 停止生效的延迟上限
+_MAX_WAIT = 600.0           # 单次播放等待上限（10 分钟，防止卡死循环）
+
+
+def _begin_play(proc=None):
+    """登记一次可中断播放，返回本代次号（供 _end_play / 等待循环使用）。"""
+    global _CURRENT_PROC
+    with _STOP_LOCK:
+        _CURRENT_PROC = proc
+        return _PLAY_GEN
+
+
+def _end_play(gen):
+    """播放结束（正常播完或被打断）：注销子进程句柄。
+
+    只有「本代」才能注销，避免把下一代刚登记好的句柄误清掉（流水线竞态）。
+    """
+    global _CURRENT_PROC
+    with _STOP_LOCK:
+        if gen == _PLAY_GEN:
+            _CURRENT_PROC = None
+
+
+def _kill_proc(proc):
+    """强制结束子进程（terminate → 等 1s → kill）。线程安全，可从任意线程调用。"""
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        proc.wait(timeout=1.0)
+    except Exception:  # noqa: BLE001
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _stop_all_playback():
+    """立即停止当前播放（跨线程可调用）：代次 +1，并直接杀掉正在播的子进程。
+
+    返回 True 表示确实打断了一个正在播放的子进程。幂等；无播放时也安全。
+    """
+    global _PLAY_GEN, _CURRENT_PROC
+    with _STOP_LOCK:
+        _PLAY_GEN += 1
+        proc = _CURRENT_PROC
+        _CURRENT_PROC = None
+    if proc is None:
+        return False
+    _kill_proc(proc)
+    return True
+
+
+def _wait_proc(proc, gen):
+    """等待子进程播完；期间检测到 stop（代次变化）则立刻终止它。
+
+    返回 True = 正常播完，False = 被打断。
+    """
+    deadline = time.time() + _MAX_WAIT
+    while True:
+        if gen != _PLAY_GEN or time.time() > deadline:
+            _kill_proc(proc)
+            return False
+        try:
+            proc.wait(timeout=_WAIT_SLICE)
+            return True
+        except subprocess.TimeoutExpired:
+            continue
+        except Exception:  # noqa: BLE001
+            return True
+
+
+def _wav_seconds(path):
+    """wav 时长（秒）；拿不到则返回 None（调用方退回阻塞播放，绝不因它报错）。"""
+    try:
+        with wave.open(path, "rb") as f:
+            rate = f.getframerate() or 0
+            if rate <= 0:
+                return None
+            return max(0.0, f.getnframes() / float(rate))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 class SapiVoiceEngine:
@@ -88,22 +198,43 @@ class SapiVoiceEngine:
                 pass
 
     def speak(self, text: str, temporary: bool = False):
-        if self.available and text:
-            try:
-                self.voice.Speak(text, 1)
+        if not (self.available and text):
+            return
+        gen = _begin_play(None)
+        try:
+            # SPF_ASYNC(1)：立即返回 —— 工作线程不再被 Speak 阻塞（2026-09-21）
+            self.voice.Speak(text, 1)
+        except Exception:  # noqa: BLE001
+            _end_play(gen)
+            return
+        try:
+            # 轮询等待播完：唯一目的是**可被打断**（WaitUntilDone 无法中断，
+            # 会让「点击人物停播」要等整句播完才生效）
+            deadline = time.time() + _MAX_WAIT
+            while time.time() < deadline:
+                if gen != _PLAY_GEN:                 # 收到 stop → 清空队列并立刻停播
+                    try:
+                        self.voice.Speak("", 3)      # SPF_PURGEBEFORESPEAK
+                    except Exception:  # noqa: BLE001
+                        pass
+                    break
                 try:
-                    self.voice.WaitUntilDone(-1)
+                    if self.voice.Status.RunningState == 1:   # SRSEDone
+                        break
                 except Exception:  # noqa: BLE001
-                    pass
-            except Exception:  # noqa: BLE001
-                pass
+                    break
+                time.sleep(_WAIT_SLICE)
+        finally:
+            _end_play(gen)
 
     def stop(self):
-        if self.available:
-            try:
-                self.voice.Speak("", 3)
-            except Exception:  # noqa: BLE001
-                pass
+        """清空播报队列并立即停播（必须在引擎所属线程内调用，COM 单元线程亲和）。"""
+        if not self.available:
+            return
+        try:
+            self.voice.Speak("", 3)              # SPF_PURGEBEFORESPEAK
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class MacSayVoiceEngine:
@@ -157,28 +288,35 @@ class MacSayVoiceEngine:
         pass
 
     def speak(self, text: str, temporary: bool = False):
-        if self.available and text:
-            cmd = ["say"]
-            if self._current:
-                cmd += ["-v", self._current]
-            cmd += ["-r", str(self._rate), text]
-            try:
-                subprocess.run(
-                    cmd, check=False,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-            except Exception:  # noqa: BLE001
-                pass
+        if not (self.available and text):
+            return
+        cmd = ["say"]
+        if self._current:
+            cmd += ["-v", self._current]
+        cmd += ["-r", str(self._rate), text]
+        try:
+            # Popen（非 subprocess.run）：必须拿到句柄才能被 stop 立即 kill
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception:  # noqa: BLE001
+            return
+        gen = _begin_play(proc)
+        try:
+            _wait_proc(proc, gen)
+        finally:
+            _end_play(gen)
 
     def stop(self):
-        if self.available:
-            try:
-                subprocess.run(
-                    ["killall", "say"], check=False,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-            except Exception:  # noqa: BLE001
-                pass
+        """停止播报：立即终止本程序启动的 say 进程。
+
+        2026-09-21 改：原实现是 ``killall say``，会连带杀掉系统上其它程序（例如
+        用户在终端里自己跑的 say）的播报。现改为只终止自己登记的那个子进程；
+        真正的「立即生效」由 voice.stop_speaking() → _stop_all_playback() 保证。
+        """
+        if not self.available:
+            return
+        _stop_all_playback()
 
 
 class LocalSoVitsEngine:
@@ -442,6 +580,8 @@ class LocalSoVitsEngine:
             pass
 
     def stop(self):
+        # 代次 +1：让所有等待循环（含 say / afplay）立刻跳出并终止子进程
+        _stop_all_playback()
         self._stop_daemon()
         if _HAS_WINSOUND:
             try:
@@ -610,10 +750,25 @@ def say_wav(path: str):
 
 
 def stop_speaking():
-    """立即清空当前语音队列并停止播报。"""
-    if _bridge is None:
-        return
-    _bridge.request_stop.emit()
+    """立即清空当前语音队列并停止播报（跨线程、**立即生效**）。
+
+    2026-09-21 修 Bug（用户反馈「闹钟响时点击人物无法暂停播报」）：
+    以前这里只 ``emit`` 一个 request_stop —— 工作线程若正阻塞在 say / afplay /
+    winsound / SAPI 里，该信号要等整段播完才轮得到，表现就是「点了没反应」。
+    现在同时做三件事，保证停止不依赖工作线程的调度：
+      ① 播放代次 +1（所有等待循环立刻跳出）；
+      ② 直接 terminate 当前 say / afplay 子进程（立即静音）；
+      ③ Windows 额外用 PlaySound(None, 0) 从任意线程停掉 winsound 播放。
+    最后仍 emit request_stop，让工作线程做引擎侧收尾（清 SAPI 队列 / 停守护进程）。
+    """
+    _stop_all_playback()
+    if sys.platform == "win32" and _HAS_WINSOUND:
+        try:
+            winsound.PlaySound(None, 0)
+        except Exception:  # noqa: BLE001
+            pass
+    if _bridge is not None:
+        _bridge.request_stop.emit()
 
 
 def on_spoken(callback):
@@ -631,24 +786,57 @@ def on_spoken(callback):
 
 
 def _play_wav_file(path: str) -> None:
-    """跨平台播放 wav：Windows 用 winsound，macOS 用系统 afplay。"""
+    """跨平台播放 wav：Windows 用 winsound，macOS 用系统 afplay。
+
+    2026-09-21 可中断改造（原来两条分支都是阻塞且无法打断 → 闹钟播报点了人物停不下来）：
+    - macOS：``Popen`` + 可中断等待，stop 时直接 terminate ``afplay`` 子进程；
+    - Windows：优先用 ``SND_ASYNC`` 起播，再按时长轮询等待（SND_ASYNC 播完无回调，
+      只能按时长；期间轮询代次 → 可被 stop 立即打断并用 PlaySound(None, 0) 停掉）。
+      拿不到时长的畸形 wav 退回原来的阻塞播放，保证行为不回归。
+    """
     if not path or not os.path.exists(path):
         return
     if sys.platform == "win32":
-        if _HAS_WINSOUND:
-            try:
+        if not _HAS_WINSOUND:
+            return
+        dur = _wav_seconds(path)
+        if dur is None:
+            try:                                  # 兜底：与历史行为一致
                 winsound.PlaySound(path, winsound.SND_FILENAME)
             except Exception:  # noqa: BLE001
                 pass
+            return
+        try:
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        except Exception:  # noqa: BLE001
+            return
+        gen = _begin_play(None)
+        try:
+            deadline = time.time() + dur + 0.15
+            while time.time() < deadline:
+                if gen != _PLAY_GEN:              # 收到 stop → 立即停播
+                    try:
+                        winsound.PlaySound(None, 0)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    break
+                time.sleep(_WAIT_SLICE)
+        finally:
+            _end_play(gen)
         return
     if sys.platform == "darwin":
         try:
-            subprocess.run(
-                ["afplay", path], check=False,
+            proc = subprocess.Popen(
+                ["afplay", path],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         except Exception:  # noqa: BLE001
-            pass
+            return
+        gen = _begin_play(proc)
+        try:
+            _wait_proc(proc, gen)
+        finally:
+            _end_play(gen)
 
 
 def _volume_adjusted_wav(source: str, volume: int) -> str:

@@ -79,6 +79,7 @@ _NSPoint = None
 _HIT_TEST_IMP = []          # 保活 IMP，防止被 GC 后崩溃
 _ACCEPTS_FIRST_MOUSE_IMP = []
 _ROUTE_BY_VIEW = {}         # NSView 指针 -> (widget, should_capture 回调)
+_FIRST_MOUSE_VIEWS = set()  # 已注入过 acceptsFirstMouse: 的 NSView 指针
 _CLASS_SEQ = [0]
 _LIB = None
 
@@ -319,6 +320,83 @@ def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verb
     return apply_stage_exempt(widget, floating=floating, tag=tag, verbose=verbose, level=level)
 
 
+def set_window_level(widget, floating, tag="level"):
+    """轻量层级切换：浮层(NSFloatingWindowLevel) / 普通层(NSNormalWindowLevel)。
+
+    与 ``apply_stage_exempt`` 分工：本函数**只改 level**，不碰 collectionBehavior、
+    不改 hidesOnDeactivate —— 供极高频调用（如 TodoDock 每 30ms 的光标轮询里
+    「悬停抬层 / 离开落层」）使用，开销仅 1~2 次 objc 消息。
+
+    为什么需要它（2026-09-21 实测）：
+    macOS **不会**把鼠标事件投递给被其它窗口覆盖的窗口（与 Windows 的 WM_NCHITTEST
+    穿透模型不同）。桌面挂件若长期待在 NSNormalWindowLevel，其它 App 的窗口一盖上来，
+    挂件就同时失去 hover 与 click —— 用户反馈「不管焦点在哪儿都应该能点/能 hover」
+    与「不能遮挡其它应用」是同一对矛盾需求，唯一解就是**动态层级**：
+    光标进入挂件范围 → 抬到浮层（此时才盖住别人、也才收得到鼠标）；
+    光标离开 → 落回普通层（不再遮挡任何界面）。空白区穿透仍由 hitTest 路由保证，
+    所以抬层期间挂件矩形内的「空白」依然把点击让给下层窗口。
+
+    幂等；返回 True 表示已处于目标层级。非 darwin 直接返回 False。
+    """
+    if not IS_MAC:
+        return False
+    try:
+        view = int(widget.winId())
+        if not view:
+            return False
+        win = _send_ptr(view, "window")
+        if not win:
+            return False
+        win = int(win)
+        target = LEVEL_FLOATING if floating else LEVEL_NORMAL
+        if _send_long(win, "level") == target:
+            return True
+        _send_void_long(win, "setLevel:", target)
+        if _send_long(win, "level") == target:
+            return True
+        _fail_log(tag, f"setLevel 未生效（target={target}）")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        mac_log(f"{tag}: set_window_level 异常 {exc!r}", tag="mac-error")
+        return False
+
+
+def iter_exempt_candidates():
+    """枚举「本程序所有应当免除台前调度管理」的顶层窗口。
+
+    用 ``QApplication.topLevelWidgets()`` 全量枚举，而不是维护一份写死的窗口清单 ——
+    用户要求「整个软件系统完全、一点也不能受台前调度影响」，将来新增的任何窗口
+    （便签、消息框、安装器、预览卡…）都自动被覆盖，不会再漏。
+
+    排除瞬时窗口：Popup（右键菜单 / 自绘下拉面板）/ ToolTip / SplashScreen ——
+    它们本就该跟随父窗口瞬时出现，给它们挂 CanJoinAllApplications 反而会让菜单
+    出现在所有 App 的舞台上（错位弹窗）。
+    """
+    if not IS_MAC:
+        return []
+    try:
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import Qt as _Qt
+    except Exception:  # noqa: BLE001
+        return []
+    transient = (
+        _Qt.WindowType.Popup
+        | _Qt.WindowType.ToolTip
+        | _Qt.WindowType.SplashScreen
+    )
+    out = []
+    for w in QApplication.topLevelWidgets():
+        try:
+            if w is None or not w.isWindow() or not w.isVisible():
+                continue
+            if w.windowType() & transient:
+                continue
+            out.append(w)
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 3) 无边框窗口的「用户可缩放」：给 NSWindow 追加 NSResizableWindowMask
 # ---------------------------------------------------------------------------
@@ -482,4 +560,64 @@ def install_hit_test_router(widget, should_capture, tag="hit-test"):
         return True
     except Exception as exc:  # noqa: BLE001
         mac_log(f"{tag}: hitTest 注入失败 {exc!r}", tag="mac-error")
+        return False
+
+
+def enable_first_mouse(widget, tag="first-mouse"):
+    """macOS：让窗口在「App 未激活」时也能「首次点击即生效」。
+
+    2026-09-21 需求背景（用户反馈「用户设置的闹钟点击人物无法暂停播报」）：
+    AppKit 默认对非 key 窗口**不投递首次鼠标事件** —— 第一次点击只用来激活本 App，
+    mousedown/mouseup 被吞掉。桌宠是置顶浮窗，用户几乎总是在「别的 App 在前台」的
+    状态下点它（闹钟响的时候更是如此），于是 PetWindow.mouseReleaseEvent 不触发
+    → _on_click 不执行 → ctx.stop_alarm() 不调用 → 播报停不下来。
+    覆盖 ``acceptsFirstMouse:`` 返回 YES 后，这一次点击会同时完成「激活 + 投递」。
+
+    与 ``install_hit_test_router`` 的分工：本函数**只加 acceptsFirstMouse:**，
+    完全不碰 hitTest:（桌宠需要整窗可点，没有「空白穿透」需求）。两者可叠加使用，
+    但要各自幂等，所以重复注入按 view 指针去重。
+
+    实现要点（坑与 hitTest 路由一致）：新类必须以该 NSView 的**真实类**为父类
+    （``object_getClass``），不能以 NSView 为父类，否则 QNSView 的绘制/事件分发
+    实现整批丢失 → 窗口既显示不出来也收不到事件。
+
+    返回 True 表示已注入（同一 view 重复调用幂等）。
+    """
+    if not IS_MAC:
+        return False
+    try:
+        lib = _objc()
+        view = int(widget.winId())
+        if not view:
+            return False
+        if view in _FIRST_MOUSE_VIEWS:
+            return True
+        if view in _ROUTE_BY_VIEW:
+            # 已被 hitTest 路由接管过（那条路已顺带加了 acceptsFirstMouse:）
+            _FIRST_MOUSE_VIEWS.add(view)
+            return True
+
+        base_cls = lib.object_getClass(ctypes.c_void_p(view))
+        if not base_cls:
+            raise RuntimeError("object_getClass 返回空")
+
+        _CLASS_SEQ[0] += 1
+        new_cls = lib.objc_allocateClassPair(
+            ctypes.c_void_p(base_cls), f"ATFirstMouseView{_CLASS_SEQ[0]}".encode(), 0
+        )
+        if not new_cls:
+            raise RuntimeError("objc_allocateClassPair 失败")
+        imp = _accepts_first_mouse_imp()
+        if not lib.class_addMethod(
+            ctypes.c_void_p(new_cls), ctypes.c_void_p(_sel("acceptsFirstMouse:")),
+            ctypes.cast(imp, ctypes.c_void_p), b"c@:@"
+        ):
+            raise RuntimeError("class_addMethod acceptsFirstMouse: 失败")
+        lib.objc_registerClassPair(ctypes.c_void_p(new_cls))
+        lib.object_setClass(ctypes.c_void_p(view), ctypes.c_void_p(new_cls))
+        _FIRST_MOUSE_VIEWS.add(view)
+        mac_log(f"{tag}: acceptsFirstMouse 已开启 view={view}", tag="mac")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        mac_log(f"{tag}: acceptsFirstMouse 注入失败 {exc!r}", tag="mac-error")
         return False

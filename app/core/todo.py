@@ -38,8 +38,11 @@ def save(tasks: list):
 
 
 def add(title: str, content: str, remind: str = None, alarm_id=None,
-        priority: str = "中") -> dict:
-    """新增任务。title 为纯文本标题；content 为富文本 HTML；priority 为 低/中/高。"""
+        priority: str = "中", bg: str = None) -> dict:
+    """新增任务。title 为纯文本标题；content 为富文本 HTML；priority 为 低/中/高。
+
+    bg 为便签卡片背景色（#rrggbb）；None 表示用便签默认主题米色。
+    """
     tasks = load()
     item = {
         "id": int(time.time() * 1000),
@@ -50,6 +53,7 @@ def add(title: str, content: str, remind: str = None, alarm_id=None,
         "remind": remind,
         "remind_enabled": remind is not None,
         "alarm_id": alarm_id,
+        "bg": bg,          # 便签背景色（None = 默认主题色），见 app/ui/todo_window.py 的 STICKY_COLORS
     }
     tasks.append(item)
     save(tasks)
@@ -193,12 +197,36 @@ def set_done(tid, done: bool) -> bool:
 
 
 def set_note(tid, title: str, content: str) -> bool:
-    """便签窗口关闭/改标题时回写标题与富文本内容（不影响提醒/优先级/闹钟）。"""
+    """便签窗口关闭/改标题时回写标题与富文本内容（不影响提醒/优先级/闹钟/背景色）。"""
     tasks = load()
     for t in tasks:
         if t["id"] == tid:
             t["title"] = title
             t["content"] = content
+            save(tasks)
+            return True
+    return False
+
+
+def get_bg(tid) -> str | None:
+    """取某条任务的便签背景色（None = 尚未设置过，用默认主题色）。"""
+    for t in load():
+        if t.get("id") == tid:
+            return t.get("bg")
+    return None
+
+
+def set_bg(tid, color: str | None) -> bool:
+    """持久化便签背景色。
+
+    2026-09-21 修 Bug：便签右键「便签背景」选色后只改了内存里的 QColor，
+    关闭再打开又回到默认色（用户反馈）。这里落库到 todos.json 的 ``bg`` 字段，
+    由 StickyNoteWindow 打开时读回；color=None 表示恢复默认主题色。
+    """
+    tasks = load()
+    for t in tasks:
+        if t.get("id") == tid:
+            t["bg"] = color
             save(tasks)
             return True
     return False
