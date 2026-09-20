@@ -316,9 +316,10 @@ class AlarmWindow(QDialog):
         self._field_labels = []
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._list_size = (400, 480)
-        self._add_size = (360, 660)
         # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
+        # （最小尺寸 = 各自默认尺寸，见 _show_* 内的 setMinimumSize）
+        self._list_size = (380, 420)
+        self._add_size = (400, 540)
         fit_window(self, "alarm_list", resizable=True)
         self._build()
 
@@ -642,6 +643,7 @@ class AlarmWindow(QDialog):
         self._form_title.setText(tr("添加闹钟"))
         self.delete_b.hide()
         self._reset_form()
+        self.setMinimumSize(*self._add_size)   # 最小 = 添加页默认尺寸
         self.resize(*self._add_size)
         self.stack.setCurrentIndex(1)
 
@@ -650,6 +652,7 @@ class AlarmWindow(QDialog):
         self._populate_form(self._editing_alarm)
         self._form_title.setText(tr("编辑闹钟"))
         self.delete_b.show()
+        self.setMinimumSize(*self._add_size)   # 最小 = 编辑页默认尺寸
         self.resize(*self._add_size)
         self.stack.setCurrentIndex(1)
 
@@ -657,6 +660,7 @@ class AlarmWindow(QDialog):
         self._editing_alarm = None
         if hasattr(self, "delete_b"):
             self.delete_b.hide()
+        self.setMinimumSize(*self._list_size)   # 最小 = 列表页默认尺寸
         self.resize(*self._list_size)
         self.stack.setCurrentIndex(0)
 

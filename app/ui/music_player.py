@@ -2132,8 +2132,9 @@ class PlayerWindow(QDialog):
         self.setAcceptDrops(True)
         # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放。
         # 用 resize + setMinimumSize 取代 setFixedSize，保证用户可自由拉伸窗口。
-        self.setMinimumSize(340, 280)
-        self.resize(360, 300)
+        # 最小尺寸 = 默认尺寸（用户要求：只能从默认大小放大），宽度与 TodoDock 对齐
+        self.setMinimumSize(PLAYER_W, PLAYER_H)
+        self.resize(PLAYER_W, PLAYER_H)
         make_resizable(self, tag="PlayerWindow")
         self._apply_window_mask()
         self._build()

@@ -263,9 +263,9 @@ class GlassWindow(QDialog):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.resize(width, height)
-        # macOS：无边框窗口追加 NSResizableWindowMask，可由用户从边缘自由缩放
-        # （最小尺寸按窗口默认大小的下限取，保证内容不溢出）；Windows 端本调用无效
-        self.setMinimumSize(max(360, int(width * 0.7)), max(320, int(height * 0.7)))
+        # macOS：无边框窗口追加 NSResizableWindowMask，可由用户从边缘自由缩放。
+        # 最小尺寸 = 默认尺寸（用户要求：只能从默认大小放大，不能缩小到默认之下）
+        self.setMinimumSize(width, height)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
