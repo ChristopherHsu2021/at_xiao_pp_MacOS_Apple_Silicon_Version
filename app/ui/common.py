@@ -6,7 +6,7 @@
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
-    QGraphicsDropShadowEffect, QApplication, QTextEdit, QLineEdit,
+    QGraphicsDropShadowEffect, QApplication, QTextEdit, QLineEdit, QComboBox,
 )
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 
@@ -696,3 +696,145 @@ class EditContextMenu(QWidget):
         self.show()
         self.raise_()
         return self
+
+
+# ==================== 自绘下拉列表（替代 macOS 系统原生弹窗） ====================
+# 背景：macOS 上 QComboBox 的弹出列表由系统原生样式绘制（带 ✓ 勾选、灰白配色、锚点
+# 错位），与 App 的暖橙圆角风格完全不符（用户反馈：像「定位器」）。QSS 无法作用于
+# 原生弹窗，故此处把弹窗整体换成自绘的 Qt.Popup 卡片列表（与右键菜单同款视觉）。
+DROPDOWN_ITEM_QSS = scale_qss(
+    "QPushButton#dropItem{background:transparent;border:none;text-align:left;"
+    "padding:0 12px;font-size:13px;color:#3d2b1f;}"
+    "QPushButton#dropItem:hover{background:rgba(249,117,16,0.10);color:#f97510;}"
+)
+DROPDOWN_ITEM_SEL_QSS = scale_qss(
+    "QPushButton#dropItem{background:rgba(249,117,16,0.12);border:none;text-align:left;"
+    "padding:0 12px;font-size:13px;color:#f97510;font-weight:600;}"
+    "QPushButton#dropItem:hover{background:rgba(249,117,16,0.18);color:#f97510;}"
+)
+
+
+class _DropdownPanel(QWidget):
+    """自绘下拉面板：暖橙圆角卡片 + 选项行（与右键菜单同款视觉）。
+
+    作为顶层 Qt.Popup 呈现：点击外部 / Esc 自动关闭由 Qt 原生保证，无需额外事件过滤。
+    """
+
+    def __init__(self, combo, items, current):
+        super().__init__(
+            combo,
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint,
+        )
+        self._combo = combo
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedWidth(max(s(40), combo.width()))
+
+        pad = s(12)                                  # 投影留白（四周）
+        root = QVBoxLayout(self)
+        root.setContentsMargins(pad, pad, pad, pad)
+        card = QWidget(self)
+        card.setObjectName("dropdownCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        card.setStyleSheet(CTX_MENU_CARD_QSS)        # 白底 / 圆角 8px / 细边框
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(s(16))
+        shadow.setOffset(0, s(4))
+        shadow.setColor(QColor(0, 0, 0, 46))         # rgba(0,0,0,0.18)
+        card.setGraphicsEffect(shadow)
+        root.addWidget(card)
+
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(s(4), s(4), s(4), s(4))
+        lay.setSpacing(s(2))
+        for i, text in enumerate(items):
+            row = QPushButton(text)
+            row.setObjectName("dropItem")
+            row.setFixedHeight(s(34))
+            row.setCursor(Qt.CursorShape.PointingHandCursor)
+            row.setStyleSheet(DROPDOWN_ITEM_SEL_QSS if i == current else DROPDOWN_ITEM_QSS)
+            row.clicked.connect(lambda _checked=False, idx=i: self._pick(idx))
+            lay.addWidget(row)
+
+    def _pick(self, idx):
+        """选中某项：先收起面板，再写回索引（触发 currentIndexChanged → 业务回调）。"""
+        combo = self._combo
+        self.close()
+        try:
+            combo.setCurrentIndex(idx)
+        except RuntimeError:
+            pass
+
+    def closeEvent(self, event):  # noqa: N802
+        # 面板关闭（选中 / 点击外部 / Esc）时清掉 combo 的引用，保证下次能再次弹出。
+        try:
+            if getattr(self._combo, "_panel", None) is self:
+                self._combo._panel = None
+        except RuntimeError:
+            pass
+        super().closeEvent(event)
+
+
+class StyledComboBox(QComboBox):
+    """非原生下拉框：完全保持 QComboBox 的对外 API，只把弹窗换成自绘卡片列表。
+
+    调用方（currentIndex / setCurrentIndex / currentIndexChanged / addItem / clear /
+    blockSignals）无需任何改动 —— 仅把构造处的 ``QComboBox()`` 换成 ``StyledComboBox()``。
+    目的：彻底避开 macOS 系统原生弹窗（带 ✓ 的「定位器」式列表）。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._panel = None
+
+    def showPopup(self):  # noqa: N802
+        if self._panel is not None or self.count() == 0:
+            return
+        items = [self.itemText(i) for i in range(self.count())]
+        panel = _DropdownPanel(self, items, self.currentIndex())
+        panel.adjustSize()
+
+        below = self.mapToGlobal(QPoint(0, self.height() + s(4)))
+        x, y = below.x(), below.y()
+        screen = QApplication.screenAt(below) or QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            if y + panel.height() > avail.bottom():      # 下方放不下 → 上翻
+                y = self.mapToGlobal(QPoint(0, -panel.height() - s(4))).y()
+            y = max(avail.top(), min(y, avail.bottom() - panel.height()))
+            x = max(avail.left(), min(x, avail.right() - panel.width()))
+        panel.move(x, y)
+
+        self._panel = panel
+        panel.show()
+        panel.raise_()
+
+    def hidePopup(self):  # noqa: N802
+        panel = self._panel
+        self._panel = None
+        if panel is not None:
+            try:
+                panel.close()
+            except RuntimeError:
+                pass
+
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        # 右侧下拉指示三角：原 QSS 的 ``image:none`` 并不能抑制风格自绘箭头，这里统一自绘，
+        # 保证配色与 App 一致；绘制区落在 ``::drop-down`` 预留的右侧 30px 内，不会压到文字。
+        cx = self.width() - s(16)
+        cy = self.height() / 2.0
+        r = s(4)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#a08e7a"))
+        chevron = QPainterPath()
+        chevron.moveTo(cx - r, cy - r * 0.5)
+        chevron.lineTo(cx + r, cy - r * 0.5)
+        chevron.lineTo(cx, cy + r * 0.8)
+        chevron.closeSubpath()
+        painter.drawPath(chevron)
+        painter.end()

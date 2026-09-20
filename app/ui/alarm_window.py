@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from app.core import alarm as alarm_mod, assets, config
 from app.core.i18n import tr
 from app.core.voice import say
-from app.ui.common import PeekCard, NoticeDialog
+from app.ui.common import PeekCard, NoticeDialog, StyledComboBox
 from app.ui.screen_fit import fit_window, scale_qss, s
 from app.ui.context_menu import ActionPopupMenu
 # 长文本省略标签：自定义播报内容可能是整句，必须省略，否则把右侧开关挤出可视区。
@@ -458,7 +458,9 @@ class AlarmWindow(QDialog):
 
         body_l.addWidget(self._field_label("重复"))
         body_l.addSpacing(s(6))
-        self.repeat_combo = QComboBox()
+        # 用自绘下拉替代 QComboBox：macOS 上原生弹窗是系统样式（带 ✓ 的「定位器」式
+        # 列表），与 App 风格不符；StyledComboBox 的对外 API 与 QComboBox 完全一致。
+        self.repeat_combo = StyledComboBox()
         self.repeat_combo.setObjectName("fieldInput")
         for value in (tr("仅一次"), tr("每天"), tr("工作日（周一至周五）"), tr("自定义")):
             self.repeat_combo.addItem(value)
