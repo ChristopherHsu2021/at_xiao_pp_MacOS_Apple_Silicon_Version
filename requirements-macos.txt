@@ -10,4 +10,8 @@ certifi>=2024.0  # macOS 冻结包无系统 CA 路径，https（酷我搜索等�
 # macOS 音乐播放后端：系统原生 AVFoundation（AVAudioPlayer），绕过 QtMultimedia 打包后无声问题。
 # 仅需 AVFoundation 这个 PyObjC 桥接包（会自动拉入 pyobjc-core + pyobjc-framework-Foundation）。
 pyobjc-framework-AVFoundation>=11.0
+# AppKit 桥接包（随 pyobjc-framework-Cocoa 提供）：窗口层级/置顶让位、台前调度豁免、
+# TodoDock 桌面挂件等 macOS 原生窗口行为都依赖 `from AppKit import ...`。
+# 显式列出，避免只靠 AVFoundation 的传递依赖（一旦缺失，原生窗口设置会静默失效）。
+pyobjc-framework-Cocoa>=11.0
 PyInstaller>=6.0

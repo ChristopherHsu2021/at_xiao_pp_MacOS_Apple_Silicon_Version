@@ -48,6 +48,15 @@ if IS_MAC:
     hiddenimports += collect_submodules("objc")
     hiddenimports += collect_submodules("Foundation")
     hiddenimports += collect_submodules("AVFoundation")
+    # AppKit / Cocoa：窗口层级（置顶/让位）、台前调度豁免、TodoDock 桌面挂件等
+    # macOS 原生窗口行为都走 `from AppKit import ...`。只收集 Foundation/AVFoundation
+    # 时，若 AppKit 桥接包没被静态分析捞进来，这些 import 会在冻结包里失败并**静默
+    # 降级**（窗口设置全部失效），故显式收集。
+    for _pkg in ("AppKit", "Cocoa"):
+        try:
+            hiddenimports += collect_submodules(_pkg)
+        except Exception as _exc:  # noqa: BLE001
+            print(f"[build.spec] 跳过 {_pkg} 收集: {_exc}")
 else:
     hiddenimports += (
         ["winreg"]

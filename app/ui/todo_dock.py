@@ -8,17 +8,32 @@
 - 无右键菜单（TaskRow 传 enable_context_menu=False）。
 - 标题行「📋 任务清单」与列表首项的间距收紧到与列表项间距一致，并去除标题下横线。
 - 勾选复选框可直接完成/取消任务；任务数据来自 app.core.todo，与主窗口/便签共享同一数据源。
-- 软件启动时由 App 创建并 show()，退出时 hide()/close()；常驻显示（点击其它软件不会被隐藏，
-  只是层级上可被其它窗口覆盖——沿用现有 keep_on_top / release_topmost 机制，本窗口不强制置顶）。
+- 软件启动时由 App 创建并 show()，退出时 hide()/close()；常驻显示（点击其它软件不会被隐藏）。
+  Windows：不强制置顶（沿用现有 keep_on_top / release_topmost 机制，可被其它窗口覆盖）。
+  macOS：见下节「macOS 显示逻辑」——登记为桌面挂件，层级固定为浮层（台前调度豁免的代价）。
+
+macOS 显示逻辑（与 Windows 分叉，见 app/ui/mac_window.py）：
+- 症状：mac 端左上角看不到挂件。根因是 Qt 的窗口标志不足以表达原生语义 —— 只用
+  ``FramelessWindowHint`` 的窗口在 macOS 是**普通 NSWindow**，会被「台前调度
+  (Stage Manager)」当成 App 的普通主窗口：前台窗口（如桌宠）一出现，其它普通窗口
+  就被移出舞台、缩进屏幕左侧的「最近使用的 App」条（表现即挂件「消失」）。
+- 修法：本窗口在 macOS 用 ``Qt.Tool``（映射为 NSPanel 浮层面板），并对底层 NSWindow
+  施加 AppKit 语义：collectionBehavior = CanJoinAllApplications | Stationary |
+  CanJoinAllSpaces | FullScreenAuxiliary | IgnoresCycle、level = NSFloatingWindowLevel、
+  hidesOnDeactivate = NO。这样它常驻所有空间/所有 App 舞台，不受台前调度、Mission
+  Control、空间切换影响，切到其它软件也不隐藏。
+- 该逻辑只在 darwin 下生效，Windows 端的窗口标志与 WM_NCHITTEST 路径保持原样。
 
 点击穿透（关键，macOS 原生实现）：
 - 需求：空白处点击穿透到桌面/其它窗口；只让「复选框」「标题文字」和「滚动区（滚轮翻页）」可点；
   标题文字过长时的 hover tooltip 仍保留（TaskRow.text 是 ElideLabel，已自带该 tooltip）。
-- Windows 不可用（本项目运行时是 macOS）。`WA_TransparentForMouseEvents` 设在顶层窗口会触发
-  macOS 的 setIgnoresMouseEvents，使整窗（含子控件）都收不到事件，无法做「背景穿透 + 子控件可点」。
+- ``WA_TransparentForMouseEvents`` 设在顶层窗口会触发 macOS 的 setIgnoresMouseEvents，
+  使整窗（含子控件）都收不到事件，无法做「背景穿透 + 子控件可点」。
 - 正确做法（macOS 原生）：覆盖 content NSView 的 hitTest: ——
   命中交互区（标题 / 滚动区 / 复选框 / 标题文字）返回 self（事件交给本窗口，Qt 再路由到具体子控件，
   滚轮也由此到达滚动区）；空白区返回 nil（穿透到下方窗口/桌面）。
+  注意：新类必须以该 NSView 的**真实类**（QNSView）为父类，且传入的点需按窗口高度翻转 y；
+  这两点踩错会让窗口既不显示也点不动（详见 mac_window.install_hit_test_router）。
 - 兜底：若 Objective-C runtime 注入失败，退回 Qt 的 WA_TransparentForMouseEvents 粒度方案
   （容器层透明、交互子控件保持可点），至少保证可交互（空白仅被本窗口吞掉、不穿透桌面）。
 """
@@ -33,6 +48,9 @@ from PyQt6.QtCore import Qt, QPoint, QRect
 from app.core import todo
 from app.core.i18n import tr
 from app.ui.todo_window import TaskRow
+from app.ui.mac_window import (
+    IS_MAC, apply_desktop_widget_style, install_hit_test_router, mac_log,
+)
 
 
 # ---- Windows 点击穿透所需的常量（仅 win32 下使用，保留兼容）----
@@ -45,10 +63,6 @@ if sys.platform == "win32":
     _HTTRANSPARENT = -1
     _HTCLIENT = 1
     _user32 = ctypes.windll.user32
-
-# macOS 原生 hitTest 注入所需的模块级状态（跨平台代码不应在导入期加载 libobjc）
-_DOCK_BY_VIEW = {}
-_HT_IMP_HOLDER = []
 
 
 # 标题行高度约 20px；行上下内边距各 10px → 项间距 20px。
@@ -64,9 +78,17 @@ class TodoDock(QWidget):
     def __init__(self, ctx):
         super().__init__()
         self.ctx = ctx
+        self._wa_fallback = False   # 是否退化为 Qt 粒度穿透方案（_render 需补挂属性）
         # 仅无边框；不设置 WindowStaysOnTopHint —— 不强制置顶，点击其它软件时本窗口
         # 不会被隐藏，只是层级上可被其它窗口覆盖（满足「必须显示 + 其它软件可更高」）。
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        # macOS 额外加 Qt.Tool（→ NSPanel 浮层面板）：普通 NSWindow 会被台前调度
+        # 当成 App 主窗口移出舞台（挂件「消失」的根因），面板型窗口不会被收走。
+        # NoDropShadowWindowHint：全透明无边框窗口的系统阴影按内容形状缓存，会在
+        # 画面后方残留灰黑重影（同类坑见 pet_window 第十六类坑），一并去掉。
+        flags = Qt.WindowType.FramelessWindowHint
+        if IS_MAC:
+            flags |= Qt.WindowType.Tool | Qt.WindowType.NoDropShadowWindowHint
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(_DOCK_WIDTH)
         self._build()
@@ -74,11 +96,49 @@ class TodoDock(QWidget):
 
         # 点击穿透按平台接入：macOS 用原生 hitTest 覆盖；Windows 用 WM_NCHITTEST；
         # 其它（含注入失败）用 Qt 粒度 WA_TransparentForMouseEvents 兜底。
-        if sys.platform == "darwin":
-            if not _setup_macos_native_clickthrough(self):
+        self._install_click_through()
+        if IS_MAC:
+            # macOS 显示逻辑：登记为「桌面挂件」，不受台前调度 / 空间切换影响。
+            self._apply_mac_outer_style()
+            app = QApplication.instance()
+            if app is not None:
+                # 切 App / 台前调度重新分舞台后重申一次挂件语义（幂等，开销极小）。
+                # 用绑定方法而非 lambda：挂件销毁时 PyQt 会自动断开，避免退出期回调野指针。
+                app.applicationStateChanged.connect(self._on_app_state_changed)
+
+    # ---------------- 平台接入：点击穿透 / macOS 显示逻辑 ----------------
+    def _install_click_through(self):
+        """装「空白穿透 + 交互区可点」；macOS 走原生 hitTest 路由，失败退 WA 粒度。"""
+        if IS_MAC:
+            ok = install_hit_test_router(
+                self,
+                lambda x, y: self._is_interactive(QPoint(int(x), int(y))),
+                tag="TodoDock",
+            )
+            self._wa_fallback = not ok
+            if not ok:
                 _apply_granular_wa(self)
-        elif sys.platform == "win32":
+                mac_log("点击穿透：原生 hitTest 注入失败 → 回退 Qt 粒度兜底方案",
+                        tag="TodoDock")
+            else:
+                mac_log("点击穿透：原生 hitTest 路由生效（空白穿透 + 交互区可点）",
+                        tag="TodoDock")
+            return ok
+        if sys.platform == "win32":
             self._setup_win32_clickthrough()
+        return True
+
+    def _apply_mac_outer_style(self, verbose=True):
+        """macOS 专属显示逻辑：不受台前调度影响（见 app/ui/mac_window.py 顶部说明）。"""
+        if not IS_MAC:
+            return False
+        return apply_desktop_widget_style(
+            self, floating=True, tag="TodoDock", verbose=verbose
+        )
+
+    def _on_app_state_changed(self, _state):
+        """应用激活状态变化（切 App / 台前调度重新分舞台）→ 重申挂件语义。"""
+        self._apply_mac_outer_style(verbose=False)
 
     # ---------------- 构建 ----------------
     def _build(self):
@@ -160,6 +220,10 @@ class TodoDock(QWidget):
                             enable_context_menu=False, open_sticky_on_click=False)
                 )
         self._fit_height()
+        # 兜底穿透方案的属性挂在「行控件」上，_render 重建行后必须重新补挂，
+        # 否则刷新出来的行会吞掉鼠标事件（原生 hitTest 方案无此问题）。
+        if self._wa_fallback:
+            _apply_granular_wa(self)
 
     def _after_toggle(self):
         """复选框切换：同步主待办窗口（若已打开，其 _render 会再刷新本挂件）；
@@ -231,6 +295,11 @@ class TodoDock(QWidget):
         super().showEvent(e)
         self._place_top_left()
         self._fit_height()
+        # Qt 可能重建原生窗口（窗口标志变化等），每次都重申挂件语义与穿透路由
+        # （两者都幂等：桌面挂件语义是回写属性，hitTest 路由同一 view 直接返回）
+        if IS_MAC:
+            self._apply_mac_outer_style()
+        self._install_click_through()
 
     def retranslate_ui(self):
         self.title.setText("📋 " + tr("任务清单"))
@@ -238,71 +307,8 @@ class TodoDock(QWidget):
 
 
 # ----------------------------------------------------------------------------
-# macOS 原生选择性点击穿透：覆盖 content NSView 的 hitTest:
+# 兜底方案（macOS 原生 hitTest 注入失败时使用）
 # ----------------------------------------------------------------------------
-def _setup_macos_native_clickthrough(dock):
-    """给挂件 content NSView 覆盖 hitTest:，交互区返回 self、空白区返回 nil（穿透）。
-    返回 True 表示注入成功；False 表示失败（调用方应回退到 WA 粒度方案）。"""
-    try:
-        import ctypes
-        import ctypes.util
-
-        objc = ctypes.CDLL(ctypes.util.find_library("objc"))
-
-        objc.objc_getClass.restype = ctypes.c_void_p
-        objc.objc_getClass.argtypes = [ctypes.c_char_p]
-        objc.sel_registerName.restype = ctypes.c_void_p
-        objc.sel_registerName.argtypes = [ctypes.c_char_p]
-        objc.objc_allocateClassPair.restype = ctypes.c_void_p
-        objc.objc_allocateClassPair.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
-        objc.objc_registerClassPair.restype = None
-        objc.objc_registerClassPair.argtypes = [ctypes.c_void_p]
-        objc.class_addMethod.restype = ctypes.c_bool
-        objc.class_addMethod.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p]
-        objc.object_setClass.restype = ctypes.c_void_p
-        objc.object_setClass.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-
-        class NSPoint(ctypes.Structure):
-            _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
-
-        registry = _DOCK_BY_VIEW
-
-        def _hit_test_impl(self_ptr, sel_ptr, a_point):
-            # a_point 为 content NSView 本地坐标系下的点（== 挂件窗口本地坐标）。
-            d = registry.get(self_ptr)
-            if d is None:
-                return self_ptr  # 找不到归属 → 保守当作可点，避免穿透到桌面却吞事件
-            try:
-                if d._is_interactive(QPoint(int(a_point.x), int(a_point.y))):
-                    return self_ptr  # 命中交互区：事件交给本窗口，Qt 再路由到子控件
-            except Exception:  # noqa: BLE001
-                return self_ptr
-            return 0  # nil → 穿透到下方窗口/桌面
-
-        HitTestIMP = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, NSPoint)
-        imp = HitTestIMP(_hit_test_impl)
-        _HT_IMP_HOLDER.append(imp)  # 保活，防止被 GC 导致崩溃
-
-        NSView = objc.objc_getClass(b"NSView")
-        new_cls = objc.objc_allocateClassPair(NSView, b"ATDockHitTestView", 0)
-        if not new_cls:
-            raise RuntimeError("objc_allocateClassPair failed")
-        sel = objc.sel_registerName(b"hitTest:")
-        # 签名：返回 id '@'、self '@'、_cmd ':'、aPoint '{CGPoint=dd}'
-        if not objc.class_addMethod(new_cls, sel, imp, b"@@:{CGPoint=dd}"):
-            raise RuntimeError("class_addMethod hitTest: failed")
-        objc.objc_registerClassPair(new_cls)
-
-        # content NSView（PyQt6 在 macOS 上 winId() 即 NSView*）
-        view = int(dock.winId())
-        objc.object_setClass(view, new_cls)
-        registry[view] = dock
-        return True
-    except Exception as exc:  # noqa: BLE001
-        print(f"[TodoDock] macOS 原生穿透初始化失败，回退 WA 方案: {exc}")
-        return False
-
-
 def _apply_granular_wa(dock):
     """兜底：Qt 粒度 WA_TransparentForMouseEvents。
     容器层（list_widget / 每行 / meta）透明不捕获；交互子控件（标题 / 复选框 / 文字）
