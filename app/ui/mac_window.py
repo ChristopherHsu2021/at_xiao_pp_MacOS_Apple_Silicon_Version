@@ -189,6 +189,15 @@ def _send_void_bool(obj_ptr, sel_name, value):
     fn(ctypes.c_void_p(obj_ptr), ctypes.c_void_p(_sel(sel_name)), ctypes.c_bool(bool(value)))
 
 
+def _send_void_ptr(obj_ptr, sel_name, value):
+    """带一个 id（指针）入参、无返回值的消息（如 ``orderBack:nil``）。"""
+    lib = _objc()
+    fn = lib.objc_msgSend
+    fn.restype = None
+    fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    fn(ctypes.c_void_p(obj_ptr), ctypes.c_void_p(_sel(sel_name)), ctypes.c_void_p(value))
+
+
 # ---------------------------------------------------------------------------
 # 诊断日志：打包后的 .app 没有可见 stdout，静默失败会让排查从零开始
 # ---------------------------------------------------------------------------
@@ -320,12 +329,47 @@ def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verb
     return apply_stage_exempt(widget, floating=floating, tag=tag, verbose=verbose, level=level)
 
 
+def order_window_back(widget, tag="order-back"):
+    """把窗口压到「同一层级所有窗口的最后方」——桌面挂件不遮挡其它 App 的关键一步。
+
+    为什么必须做（2026-09-21 用户截图：「这个 tododock 在功能完整的情况下，不要遮盖其他
+    应用和页面」）：
+    AppKit 的窗口层级只决定「层」（NSNormalWindowLevel / NSFloatingWindowLevel…），
+    **同层之内仍按 orderFront / orderBack 的先后排序，且这个顺序是全局跨 App 的**。
+    挂件的层级策略是动态的（光标进入 → 抬到浮层；离开 → 落回普通层），而「抬到浮层」
+    必然把它 order 到最前；落回普通层时只改 level **不会**把它从最前挪走 →
+    挂件变成「普通层里最靠前的那一个」，于是继续盖住其它 App 更早打开的窗口
+    （截图里挂件文字就叠在一个原生窗口上）。同理，挂件启动时 show() 会 orderFront，
+    也会盖住此前已打开的所有同层窗口。
+
+    解法：``orderBack:``（AppKit：移到本层最后，跨 App 生效）。桌面层
+    （LEVEL_DESKTOP = INT32_MIN+X）比普通层低得多，所以压到普通层最后**不会**沉到壁纸
+    之下，只是「排在所有正常窗口后面」；需要交互时轮询会立刻把它抬回浮层。
+
+    幂等、失败只写日志；非 darwin 直接返回 False。
+    """
+    if not IS_MAC:
+        return False
+    try:
+        view = int(widget.winId())
+        if not view:
+            return False
+        win = _send_ptr(view, "window")
+        if not win:
+            return False
+        _send_void_ptr(int(win), "orderBack:", 0)   # orderBack:nil
+        return True
+    except Exception as exc:  # noqa: BLE001
+        mac_log(f"{tag}: order_window_back 异常 {exc!r}", tag="mac-error")
+        return False
+
+
 def set_window_level(widget, floating, tag="level"):
     """轻量层级切换：浮层(NSFloatingWindowLevel) / 普通层(NSNormalWindowLevel)。
 
-    与 ``apply_stage_exempt`` 分工：本函数**只改 level**，不碰 collectionBehavior、
-    不改 hidesOnDeactivate —— 供极高频调用（如 TodoDock 每 30ms 的光标轮询里
-    「悬停抬层 / 离开落层」）使用，开销仅 1~2 次 objc 消息。
+    与 ``apply_stage_exempt`` 分工：本函数**只改 level**（外加落层时的一次 ``orderBack:``），
+    不碰 collectionBehavior、不改 hidesOnDeactivate —— 供极高频调用（如 TodoDock 每 40ms
+    的光标轮询里「悬停抬层 / 离开落层」）使用，开销仅 1~3 次 objc 消息。
 
     为什么需要它（2026-09-21 实测）：
     macOS **不会**把鼠标事件投递给被其它窗口覆盖的窗口（与 Windows 的 WM_NCHITTEST
@@ -335,6 +379,9 @@ def set_window_level(widget, floating, tag="level"):
     光标进入挂件范围 → 抬到浮层（此时才盖住别人、也才收得到鼠标）；
     光标离开 → 落回普通层（不再遮挡任何界面）。空白区穿透仍由 hitTest 路由保证，
     所以抬层期间挂件矩形内的「空白」依然把点击让给下层窗口。
+
+    ★ 落层时必须同时 ``orderBack:``：只把 level 改回普通层，窗口仍停留在「普通层最前」，
+    照样压着其它 App 的窗口（用户截图反馈）——详见 ``order_window_back``。
 
     幂等；返回 True 表示已处于目标层级。非 darwin 直接返回 False。
     """
@@ -350,9 +397,13 @@ def set_window_level(widget, floating, tag="level"):
         win = int(win)
         target = LEVEL_FLOATING if floating else LEVEL_NORMAL
         if _send_long(win, "level") == target:
+            if not floating:
+                _send_void_ptr(win, "orderBack:", 0)   # 已在普通层：确保同时在最靠后
             return True
         _send_void_long(win, "setLevel:", target)
         if _send_long(win, "level") == target:
+            if not floating:
+                _send_void_ptr(win, "orderBack:", 0)
             return True
         _fail_log(tag, f"setLevel 未生效（target={target}）")
         return False

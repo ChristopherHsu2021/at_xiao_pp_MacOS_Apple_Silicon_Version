@@ -30,6 +30,10 @@ from app.ui.common import (
     EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui,
 )
 from app.ui.screen_fit import fit_window, scale_qss, s, WINDOW_DEFAULTS
+from app.ui.style import (
+    TASK_TITLE_DONE_FG, TASK_TITLE_FG, TASK_TITLE_SIZE, TASK_TITLE_WEIGHT,
+    TITLE_BAR_QSS, PAGE_TITLE_SIZE, task_title_qss,
+)
 from app.ui.mac_window import apply_stage_exempt
 from app.ui.context_menu import ActionPopupMenu, ACTION_POPUP_QSS
 from app.ui.rich_editor import RichEditor, svg_icon
@@ -53,9 +57,10 @@ QWidget#add-panel {
     background: transparent;
 }
 QLabel#window-title {
-    font-size: 15px;
-    font-weight: 700;
-    color: #3d2b1f;
+    /* 顶栏「📋 任务清单」标题：与 TodoDock 顶栏共用同一套渲染。
+       样式本体在 app/ui/style.TITLE_BAR_QSS（widget 级设定，见 TodoWindow._build），
+       这里刻意不再写死一份，避免两处数字各自漂移（三处标题渲染同步的需求根源）。 */
+    background: transparent;
 }
 QPushButton#todoSecondary,
 QPushButton#todoDanger {
@@ -113,6 +118,8 @@ QScrollBar:vertical { width: 4px; background: transparent; margin: 6px 0; }
 QScrollBar::handle:vertical { background: rgba(160,142,122,0.35); border-radius: 2px; min-height: 24px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 /* 添加/编辑页：标题输入 + 字段标签 + 优先级 chips + 底部按钮（对齐 index.html） */
+/* font-size/font-weight/color 与 app/ui/style.TASK_TITLE_*（16px/600/#3B2A1A）保持一致：
+   它就是「任务标题」这套渲染在添加页的落点，改字号时两处一起改（见 style.py 注释）。 */
 QLineEdit#titleInput {
     border: 1.5px solid #F1E4D3; border-radius: 14px;
     background: #FFFDFA; font-size: 16px; font-weight: 600; color: #3B2A1A;
@@ -175,8 +182,10 @@ QCheckBox::indicator:checked {
 }
 """)
 
-LABEL_QSS = scale_qss("font-size:13px;color:#3d2b1f;font-weight:500;")
-DONE_LABEL_QSS = scale_qss("font-size:13px;color:#a08e7a;font-weight:500;text-decoration:line-through;")
+# 任务标题（列表行 / TodoDock 行 / 便签标题）统一取自 app/ui/style.task_title_qss：
+# 字号、字重、颜色、完成态颜色只有一处定义（需求：「三者的任务标题渲染要同步」）。
+LABEL_QSS = task_title_qss(False)
+DONE_LABEL_QSS = task_title_qss(True)
 # 列表行右侧信息标签（对齐 index.html 的 .tag / .tag.p-low / .tag.p-mid / .tag.p-high：
 # 小号圆角标签，低=绿 / 中=橙 / 高=红）。
 # 注意：QSS 的 border-radius 在大半径（如 999px）时会被 Qt 完全忽略（实测 8px 才生效），
@@ -343,26 +352,27 @@ class ElideLabel(QLabel):
         self._refresh_tooltip()
 
     def set_extra_tip(self, text):
-        """附加 hover 提示：TodoDock 取消「提醒时间」常显后，改在标题文字下方 hover 显示。
+        """附加 hover 提示：TodoDock 取消「提醒时间」常显后，改在任务标题上 hover 显示。
 
-        形如「提醒时间：2026-09-21 02:07」，与标题全文一起拼进 tooltip（标题本身过长时
-        仍能看到完整文字，不丢信息）。
+        2026-09-21 需求（用户截图）：hover 白框**只用于显示提醒时间**，不再附带标题/内容
+        全文——长标题在卡片里折行会把桌面糊住（截图里白框内容就是被省略标题的全文）。
+        没有提醒时间的任务 → 不设提示（``has_hover_info()`` 为假 → 任何位置都不弹框）。
+        标题本身过长时仍可读全：悬停时行内「跑马灯」横向滑动（见 paintEvent）。
         """
         self._extra_tip = text or ""
         self._refresh_tooltip()
 
     def hover_tip_text(self):
-        """hover 提示全文（提醒时间 + 标题全文）：原生 tooltip 与挂件自绘提示卡共用。"""
-        return "\n".join(p for p in (self._extra_tip, self._full) if p)
+        """hover 提示全文 = 仅「提醒时间」（空串表示不该弹提示框）。"""
+        return self._extra_tip
 
     def has_hover_info(self):
-        """hover 是否「有额外信息可给」：有附加提示（提醒时间）或标题被省略。
+        """是否该弹 hover 提示框：**只取决于有没有提醒时间**（2026-09-21 需求）。
 
-        用于桌面挂件：没有额外信息时不再弹提示卡（避免把原文重复显示一遍、糊住桌面）。
+        原实现还会在「标题被省略」时弹框显示标题全文，现按需求取消：hover 白框只承载
+        提醒时间，没有提醒时间就没有白框。
         """
-        if self._extra_tip:
-            return True
-        return self.fontMetrics().horizontalAdvance(self._full) > self._available()
+        return bool(self._extra_tip)
 
     def set_external_hover_owner(self, external):
         """把本标签的 hover 交给外部驱动（桌面挂件轮询）。
@@ -409,8 +419,8 @@ class ElideLabel(QLabel):
         if self._external_hover:
             self.setToolTip(None)      # 外部接管：提示改由挂件自绘提示卡给出
             return
-        parts = [p for p in (self._extra_tip, self._full) if p]
-        self.setToolTip("\n".join(parts) if parts else None)
+        # 只挂「提醒时间」；没有提醒时间 → 不挂 tooltip（不弹白框）——2026-09-21 需求。
+        self.setToolTip(self._extra_tip or None)
 
     def set_done(self, done):
         self._done = bool(done)
@@ -946,6 +956,8 @@ class TodoWindow(QDialog):
         header_lay.setSpacing(s(6))
         self.title_label = QLabel("📋 " + tr("任务清单"))
         self.title_label.setObjectName("window-title")
+        # 顶栏标题样式与 TodoDock 顶栏同源（style.TITLE_BAR_QSS）→ 两处渲染完全一致
+        self.title_label.setStyleSheet(TITLE_BAR_QSS)
         header_lay.addWidget(self.title_label)
         header_lay.addStretch(1)
         # 编辑态专属：关闭按钮（自绘 X 图标，不再使用字符 ✕）
@@ -1259,7 +1271,7 @@ class TodoWindow(QDialog):
         w = max(int(round(s(48))), int(need) + slack)   # 下限保证点击热区
         # 标题保底宽度：任何语言下「📋 任务清单」都完整可见（布局优先满足它）
         title_font = self.title_label.font()
-        title_font.setPixelSize(s(15))        # 同 QLabel#window-title 的 font-size
+        title_font.setPixelSize(s(PAGE_TITLE_SIZE))   # 同 style.TITLE_BAR_QSS 的 font-size
         tfm = QFontMetrics(title_font)
         title_min = tfm.horizontalAdvance(self.title_label.text()) + s(4)
         self.title_label.setMinimumWidth(title_min)
@@ -2073,12 +2085,16 @@ class StickyNoteWindow(QWidget):
             editor.retranslate()
 
     def _title_qss(self, done):
-        # HTML：text-xl(20px) font-medium(500) title-underline(2px #d8d8d8) pb-1(4px)
-        # 完成时 line-through + opacity-70（用灰色近似）
-        color = "#9ca3af" if done else "#1f2937"
+        # 与「任务清单行 / TodoDock 行」共用同一套任务标题渲染（app/ui/style.TASK_TITLE_*）：
+        # 字号 / 字重 / 颜色 / 完成态颜色全部一致 —— 2026-09-21 需求「三处渲染同步」。
+        # 唯一保留的差异是这条 2px 下划线：它是便签「标题可直接编辑」的唯一视觉提示，
+        # 去掉后整张卡片看不出哪里能改标题（如需彻底一致，删掉 border-bottom 即可）。
+        # HTML 参考：text-xl font-medium title-underline(2px #d8d8d8) pb-1(4px)
+        color = TASK_TITLE_DONE_FG if done else TASK_TITLE_FG
         return (
             "QLineEdit#stickyTitle{background:transparent;border:none;"
-            "border-bottom:2px solid #d8d8d8;font-size:20px;font-weight:500;"
+            "border-bottom:2px solid #d8d8d8;"
+            f"font-size:{TASK_TITLE_SIZE}px;font-weight:{TASK_TITLE_WEIGHT};"
             f"color:{color};padding:0 2px 4px 2px;}}"
             "QLineEdit#stickyTitle:focus{border-bottom-color:#F97316;}"
         )

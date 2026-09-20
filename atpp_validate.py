@@ -55,12 +55,14 @@ todo_mod.set_done = set_done
 todo_mod.set_note = set_note
 
 # 克隆任务测试用：不落盘，直接返回一个带自增 id 的新任务
+# 注意：签名必须与 app/core/todo.add 保持一致（含 bg —— 便签背景色持久化新增的字段），
+# 否则 copy_task 里多传一个参数就会让本脚本以「假失败」中断掉后面的全部校验。
 _add_count = [0]
-def _stub_add(title, content, remind=None, alarm_id=None, priority="中"):
+def _stub_add(title, content, remind=None, alarm_id=None, priority="中", bg=None):
     _add_count[0] += 1
     return {"id": 9000 + _add_count[0], "title": title, "content": content,
             "priority": priority, "done": False, "remind": remind,
-            "remind_enabled": remind is not None, "alarm_id": alarm_id}
+            "remind_enabled": remind is not None, "alarm_id": alarm_id, "bg": bg}
 todo_mod.add = _stub_add
 
 results = []

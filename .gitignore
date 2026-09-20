@@ -31,5 +31,11 @@ release/*.zip
 *.log
 *.tmp
 
+# 本地离屏校验脚本（atpp_validate.py）产出的截图，不属于源码
+/color_popup.png
+/sticky_done_pinned.png
+/sticky_menu.png
+/todo_header.png
+
 # WorkBuddy 内部记忆 / agent 数据（非项目源码）
 .workbuddy/

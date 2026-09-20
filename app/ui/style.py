@@ -114,6 +114,49 @@ GLASS_STYLE = scale_qss(
     " border-radius: 20px;"
 )
 
+# ---------------------------------------------------------------------------
+# 任务标题统一渲染（2026-09-21 需求：「TodoDock / 任务清单页面 / 便签页面 三者的任务
+# 标题渲染要同步」）
+# ---------------------------------------------------------------------------
+# 三处此前各写一套，同一个任务标题呈现完全不同的字号：
+#   - 任务清单页 / TodoDock 的行标题：LABEL_QSS（旧 13px/500）
+#   - 便签卡片标题：QLineEdit#stickyTitle（旧 20px/500 + 下划线）
+# → 用户截图里「同一个任务，在清单里是小字、在便签里是大字」。现集中到此处定义，
+# 三处（含添加页的标题输入框）引用同一常量，改一处即全局同步。
+#
+# 为什么取 16px：与「添加/编辑页」的任务标题输入框（QLineEdit#titleInput，16px/600）同源，
+# 本就是设计稿里「任务标题」的既定尺度。对列表行/挂件行而言不至于撑高行距（进度 ~24px），
+# 对便签标题而言不至于大到与正文脱节。想整体调大/调小：只改 TASK_TITLE_SIZE 一处。
+TASK_TITLE_SIZE = 16            # 设计像素（scale_qss 会按 UI_SCALE 等比缩放）
+TASK_TITLE_WEIGHT = 600
+TASK_TITLE_FG = "#3B2A1A"
+TASK_TITLE_DONE_FG = "#A08E7A"
+
+
+def task_title_qss(done=False):
+    """任务标题样式（任务清单行 / TodoDock 行 / 便签标题 共用）。
+
+    ``done=True`` → 灰字 + 删除线（与 ElideLabel.set_done 自绘的删除线同色同义）。
+    """
+    color = TASK_TITLE_DONE_FG if done else TASK_TITLE_FG
+    strike = "text-decoration:line-through;" if done else ""
+    return scale_qss(
+        f"font-size:{TASK_TITLE_SIZE}px;color:{color};"
+        f"font-weight:{TASK_TITLE_WEIGHT};{strike}"
+    )
+
+
+# 区域标题（TodoDock 顶栏「📋 任务清单」与任务清单页顶栏标题共用同一套渲染）
+PAGE_TITLE_SIZE = 15
+PAGE_TITLE_WEIGHT = 700
+PAGE_TITLE_FG = "#3d2b1f"
+TITLE_BAR_QSS = scale_qss(
+    "QLabel#window-title, QLabel#dockTitle {"
+    f"font-size:{PAGE_TITLE_SIZE}px;font-weight:{PAGE_TITLE_WEIGHT};"
+    f"color:{PAGE_TITLE_FG};"
+    "background:transparent;}"
+)
+
 
 def apply_theme(app):
     """为 QApplication 应用主题。"""

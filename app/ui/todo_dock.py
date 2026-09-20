@@ -9,7 +9,9 @@
 - 标题行「📋 任务清单」与列表首项的间距收紧到与列表项间距一致，并去除标题下横线。
 - 复选框与任务清单页共用 TodoCheckBox（尺寸/样式天然一致）。
 - **不常显「提醒时间」**：该标签是「年-月-日 时:分」长串，会明显撑宽挂件；改为在任务标题
-  上挂 hover 提示「提醒时间：年-月-日 时:分」（TaskRow(show_remind_tag=False)）。
+  上挂 hover 提示卡，卡片内容**只有提醒时间**（TaskRow(show_remind_tag=False)）。
+  没有提醒时间的任务不弹任何提示卡；被省略的长标题靠行内「跑马灯」看全，不再进提示卡
+  （2026-09-21 需求：hover 白框只用于显示提醒时间，不显示内容和标题）。
 - 勾选复选框可直接完成/取消任务；任务数据来自 app.core.todo，与主窗口/便签共享同一数据源。
 - 软件启动时由 App 创建并 show()，退出时 hide()/close()；常驻显示（点击其它软件不会被隐藏）。
   Windows：不强制置顶（沿用现有 keep_on_top / release_topmost 机制，可被其它窗口覆盖）。
@@ -62,8 +64,14 @@ hover 与「任意 App 都要能点/能 hover」（2026-09-21 需求，本节是
      也才收得到鼠标）；光标离开 → 落回普通层（不再遮挡任何界面）。空白区穿透仍由
      hitTest 路由保证，所以抬层期间挂件矩形内的「空白」依然把点击让给下层窗口。
      实现见 ``mac_window.set_window_level``（只改 level，不动 collectionBehavior）。
+3. **同层之内还有先后顺序**（2026-09-21 第三轮：用户截图「tododock 遮盖其他应用和页面」）。
+   动态层级只解决「层」，层内顺序仍按 orderFront/orderBack 排，且**全局跨 App** 生效：
+   抬到浮层必然把它顶到最前，落回普通层时若只改 level，它会**停在普通层最前** →
+   继续压着其它 App 更早打开的窗口（截图里挂件文字叠在一个原生窗口上）。挂件启动时
+   的 show() 也有同样问题。→ 解法：落层/重申语义时一律补一次 ``orderBack:``
+   （``mac_window.order_window_back``），把挂件压到普通层最后；需要交互时轮询再抬回浮层。
 
-两条合起来即为「光标到哪儿，挂件就在哪儿可点可 hover；光标一走，挂件就不挡人」。
+三条合起来即为「光标到哪儿，挂件就在哪儿可点可 hover；光标一走，挂件就沉到最底下不挡人」。
 """
 
 import sys
@@ -78,9 +86,10 @@ from app.core import todo
 from app.core.i18n import tr
 from app.ui.todo_window import TaskRow, LIST_WINDOW_SIZE   # noqa: F401  (LIST_WINDOW_SIZE 保留供参考/将来对齐)
 from app.ui.screen_fit import scale_qss, s
+from app.ui.style import TITLE_BAR_QSS
 from app.ui.mac_window import (
     IS_MAC, apply_desktop_widget_style, install_hit_test_router, mac_log,
-    set_window_level,
+    order_window_back, set_window_level,
 )
 
 
@@ -241,11 +250,12 @@ class TodoDock(QWidget):
         - 桌面层（level="desktop" / kCGDesktopIconWindowLevel）：实测**不可用** ——
           内容被系统合成成半透明发虚，且被 Finder 桌面窗口吃掉全部鼠标事件
           → 挂件完全无法点击。
-        - 因此这里只把**基准层级**设为 NSNormalWindowLevel；真正的层级由
-          ``_ensure_level`` 在 40ms 轮询里动态切换：
+        - 因此这里只把**基准层级**设为 NSNormalWindowLevel，并补一次 ``orderBack:``
+          （压到「普通层最后方」—— 否则启动时的 show()/曾经抬过层都会让它停在最前，继续
+          压着其它 App 的窗口）。真正的层级由 ``_ensure_level`` 在 40ms 轮询里动态切换：
             光标在挂件上 → LEVEL_FLOATING（否则 macOS 不给被覆盖窗口投递鼠标，
                              hover/点击全失效 —— 用户「任意应用都要能点/能 hover」）
-            光标离开     → LEVEL_NORMAL（不遮挡任何界面）
+            光标离开     → LEVEL_NORMAL + orderBack（不遮挡任何界面）
           本方法会在切 App 时被调用，故顺手把 _floating 复位为 False（与 NORMAL 一致），
           让轮询下一拍自行纠正（幂等、无竞态：两者都只是写同一个 level）。
         """
@@ -256,7 +266,19 @@ class TodoDock(QWidget):
         )
         if ok:
             self._floating = False
+            # ★ 只落 level 不够：窗口仍停在「普通层最前」，照样压着其它 App 的窗口
+            #   （用户截图：「tododock 遮盖其他应用和页面」）。必须同时 orderBack 压到最后。
+            #   光标此刻正在挂件上时不要压（下一拍轮询就会把它抬回浮层，压了只是白抖一下）。
+            if not self._cursor_inside():
+                order_window_back(self, tag="TodoDock")
         return ok
+
+    def _cursor_inside(self):
+        """光标是否落在挂件窗口矩形内（异常一律按「不在」处理，绝不影响主流程）。"""
+        try:
+            return self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+        except Exception:  # noqa: BLE001
+            return False
 
     def _on_app_state_changed(self, _state):
         """应用激活状态变化（切 App / 台前调度重新分舞台）→ 重申挂件语义。"""
@@ -282,8 +304,12 @@ class TodoDock(QWidget):
             if row is not self._hover_row:
                 self._set_hover_row(row)
             label = getattr(row, "text", None) if row is not None else None
-            if label is not None and label.has_hover_info():
-                self._show_tip(label.hover_tip_text(), pos)
+            # 提示卡内容 = 仅「提醒时间」（TaskRow 在无提醒时间时不会 set_extra_tip
+            # → hover_tip_text() 为空串 → 不弹白框）。标题/内容全文一律不再进提示卡
+            # —— 2026-09-21 需求（长标题在卡片里折行会把桌面糊住）。
+            tip_text = label.hover_tip_text() if label is not None else ""
+            if tip_text:
+                self._show_tip(tip_text, pos)
             else:
                 self._hide_tip()
         except Exception:  # noqa: BLE001
@@ -334,7 +360,7 @@ class TodoDock(QWidget):
         self.update()            # 重绘行 hover 高亮（见 paintEvent）
 
     def _show_tip(self, text, global_pos):
-        """在挂件右侧弹出自绘提示卡（提醒时间 / 被省略的标题全文）。"""
+        """在挂件右侧弹出自绘提示卡；内容只有「提醒时间：年-月-日 时:分」。"""
         tip = self._tip
         if tip is None:
             tip = _DockHoverTip()
@@ -397,7 +423,9 @@ class TodoDock(QWidget):
 
         self.title = QLabel("📋 " + tr("任务清单"))
         self.title.setObjectName("dockTitle")
-        self.title.setStyleSheet(self._qss())
+        # 顶栏标题与「任务清单页面」顶栏共用 style.TITLE_BAR_QSS（同一套字号/字重/颜色）
+        # —— 三处任务标题渲染同步的需求之一（原来这里 14px、清单页 15px）。
+        self.title.setStyleSheet(TITLE_BAR_QSS)
         root.addWidget(self.title)
 
         self.scroll = QScrollArea()
@@ -420,13 +448,9 @@ class TodoDock(QWidget):
     @staticmethod
     def _qss():
         # 随全局 80% 等比缩放（挂件也是「页面」，内饰要与其它页面同尺度）
+        # 注意：顶栏标题不再在这里定义 —— 它改用 app/ui/style.TITLE_BAR_QSS，
+        # 与任务清单页顶栏同源（三处标题渲染同步）。这里只剩空状态文案。
         return scale_qss("""
-        QLabel#dockTitle {
-            font-size: 14px;
-            font-weight: 700;
-            color: #3d2b1f;
-            background: transparent;
-        }
         QLabel#dockEmpty {
             font-size: 13px;
             font-weight: 500;
