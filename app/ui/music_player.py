@@ -1934,6 +1934,9 @@ QPushButton:hover {{ border: 2px solid #ffffff; }}
         root.addWidget(self.palette)
 
         self.lyric = GradientLyricLabel()
+        # 穿透处理：歌词文本区域可点击穿过，落到其后的其它软件窗口，不遮挡操作；
+        # 控制按钮(播放/暂停/音量等)未设该属性仍可点击，窗口仍可借顶部控制栏拖拽。
+        self.lyric.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         root.addWidget(self.lyric)
 
     def _control_slot(self, button):

@@ -32,7 +32,7 @@ if sys.platform == "darwin" and not os.environ.get("SSL_CERT_FILE"):
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import QTimer, QPoint
+from PyQt6.QtCore import Qt, QTimer, QPoint
 
 from app.core import assets, config, pathutil
 from app.core.state import state
@@ -46,6 +46,7 @@ from app.ui.pet_window import PetWindow, PET_WAKE_MESSAGE
 from app.ui.tray import TrayManager
 from app.ui.music_player import MusicPlayer
 from app.ui.todo_window import TodoWindow
+from app.ui.todo_dock import TodoDock
 from app.ui.alarm_window import AlarmWindow
 from app.ui.timer_window import TimerWindow
 from app.ui.settings_window import SettingsWindow
@@ -113,6 +114,9 @@ class App:
         self.tray.show()
         self._position_pet()
         self.pet.show()
+        # 常驻任务清单挂件：软件启动即创建并显示，退出前一直存在
+        self.todo_dock = TodoDock(self)
+        self.todo_dock.show()
         QApplication.instance().applicationStateChanged.connect(lambda _state: self._keep_topmost())
         self._keep_topmost()
 
@@ -284,17 +288,28 @@ class App:
         self._topmost_released = True
 
     def _foreground_belongs_to_other_app(self):
-        if sys.platform != "win32":
-            return False
+        """判断当前是否应「让路」：用户切到其它软件时，本程序窗口不再强制置顶。
+
+        跨平台：应用失活(applicationState != ApplicationActive)即视为让路；
+        Windows 再叠加 GetForegroundWindow 精确判定（前台窗口不属于本程序）。
+        命中即触发 _release_app_topmost()，窗口降到普通层级但保持可见（不隐藏）。
+        """
         try:
-            import ctypes
-            foreground = ctypes.windll.user32.GetForegroundWindow()
-            if not foreground:
-                return False
-            own_handles = {int(w.winId()) for w in QApplication.topLevelWidgets() if w is not None}
-            return foreground not in own_handles
+            if QApplication.applicationState() != Qt.ApplicationState.ApplicationActive:
+                return True
         except Exception:  # noqa: BLE001
-            return False
+            pass
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                foreground = ctypes.windll.user32.GetForegroundWindow()
+                if not foreground:
+                    return False
+                own_handles = {int(w.winId()) for w in QApplication.topLevelWidgets() if w is not None}
+                return foreground not in own_handles
+            except Exception:  # noqa: BLE001
+                return False
+        return False
 
     def open_todo(self):
         self._single("todo", lambda: TodoWindow(self))
@@ -312,6 +327,11 @@ class App:
         window = self.windows.get("todo")
         if window is not None:
             window.refresh_external()
+
+    def refresh_todo_dock(self):
+        dock = getattr(self, "todo_dock", None)
+        if dock is not None:
+            dock.refresh()
 
     def refresh_alarm(self):
         window = self.windows.get("alarm")
@@ -425,6 +445,8 @@ class App:
         for window in self.windows.values():
             if window is not None:
                 window.hide()
+        if getattr(self, "todo_dock", None) is not None:
+            self.todo_dock.hide()
         self.tray.hide()
 
     def _stop_background_for_quit(self):
@@ -447,6 +469,8 @@ class App:
                 window.retranslate_ui()
         if self.scene is not None and hasattr(self.scene, "retranslate_ui"):
             self.scene.retranslate_ui()
+        if getattr(self, "todo_dock", None) is not None and hasattr(self.todo_dock, "retranslate_ui"):
+            self.todo_dock.retranslate_ui()
         from app.ui.install_window import set_autostart
         # 仅打包后（真实 exe/app）才写自启；源码模式下跳过
         if getattr(sys, "frozen", False):

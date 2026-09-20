@@ -182,6 +182,11 @@ TAG_BG, TAG_FG = "#F4F0E8", "#8A7358"
 _TAG_PRIO_COLORS = {"低": ("#EDF7EC", "#4C9A54"),
                     "中": ("#FFF7EE", "#EA6A1F"),
                     "高": ("#FDECEC", "#C53D36")}
+# 便签左上角「优先级呼吸灯」的实心圆颜色：低=绿 / 中=橙 / 高=红。
+# 取比标签文字色更亮一档，作为发光圆点更醒目（仍是同一色系，不破坏主题）。
+_PRIO_DOT_COLORS = {"低": "#43C463",
+                    "中": "#F97316",
+                    "高": "#E5534C"}
 
 
 def priority_tag_colors(prio: str):
@@ -586,28 +591,35 @@ class ResizeGrip(QWidget):
 
 
 class TaskRow(QWidget):
-    def __init__(self, task, on_toggle, on_edit, on_delete, on_interact=None):
+    def __init__(self, task, on_toggle, on_edit=None, on_delete=None, on_interact=None,
+                 enable_context_menu=True, open_sticky_on_click=True):
         super().__init__()
         self.task = task
         self.on_toggle = on_toggle
         self.on_edit = on_edit
         self.on_delete = on_delete
         self.on_interact = on_interact
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+        self.enable_context_menu = enable_context_menu
+        if enable_context_menu:
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+        else:
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 10, 8, 10)
         lay.setSpacing(10)
         self.check = TodoCheckBox()
         self.check.setChecked(task["done"])
         self.check.toggled.connect(self._toggled)
-        self.check.contextMenuEvent = self._show_context_menu
+        self.check.contextMenuEvent = self._show_context_menu if enable_context_menu else (lambda e: None)
         # 列表页：标题文字点击不做任何行为（按需求临时改为无操作），保留右键菜单编辑/删除。
         self.text = ElideLabel(task.get("title") or task.get("content") or "")
         self.text.setStyleSheet(LABEL_QSS)
         self.text.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.text.contextMenuEvent = self._show_context_menu
+        if enable_context_menu:
+            self.text.contextMenuEvent = self._show_context_menu
         # 左键点击标题文字 → 打开便签式任务卡片窗口（右键仍走编辑/删除菜单）
-        self.text.mousePressEvent = self._on_title_press
+        if open_sticky_on_click:
+            self.text.mousePressEvent = self._on_title_press
         # 右侧信息（对齐 index.html 的 .tc-meta）：提醒时间（有提醒才显示）+ 优先级（必有）
         remind = task.get("remind") if task.get("remind_enabled", True) else None
         due_text = self._format_remind(remind)
@@ -618,9 +630,12 @@ class TaskRow(QWidget):
         meta_lay.setSpacing(8)
         if due_text:
             meta_lay.addWidget(self._make_tag(due_text, TAG_BG, TAG_FG))
-        meta_lay.addWidget(self._make_tag(prio, *priority_tag_colors(prio)))
+        # 优先级标签文字跟随语言（低/中/高 → Low/Medium/High）；配色仍按原始中文键查表，
+        # 数据库里的 priority 值保持「低/中/高」不改，避免破坏既有数据与逻辑。
+        meta_lay.addWidget(self._make_tag(tr(prio), *priority_tag_colors(prio)))
         self.meta.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-        self.meta.contextMenuEvent = self._show_context_menu
+        if enable_context_menu:
+            self.meta.contextMenuEvent = self._show_context_menu
         lay.addWidget(self.check)
         lay.addWidget(self.text, 1)
         lay.addWidget(self.meta)
@@ -629,7 +644,8 @@ class TaskRow(QWidget):
     def _make_tag(self, text, bg, fg, radius=8):
         """右侧圆角标签；不给它收缩空间，保证标签文字永远完整。"""
         tag = TagLabel(text, bg, fg, radius)
-        tag.contextMenuEvent = self._show_context_menu
+        if self.enable_context_menu:
+            tag.contextMenuEvent = self._show_context_menu
         return tag
 
     def _format_remind(self, value):
@@ -670,7 +686,8 @@ class TaskRow(QWidget):
             opener(self.task)
 
     def contextMenuEvent(self, event):  # noqa: N802
-        self._show_context_menu(event)
+        if self.enable_context_menu:
+            self._show_context_menu(event)
 
     def _show_context_menu(self, event):
         task = dict(self.task)
@@ -822,10 +839,14 @@ class TodoWindow(QDialog):
         self._narrow = None  # 窄宽度内边距状态缓存
 
         # 任务标题
-        title_label = QLabel()
-        title_label.setObjectName("fieldLabel")
+        # ★ 字段标签提升为实例属性：原先是局部变量 → retranslate_ui 拿不到引用，
+        #   切语言后仍是旧语言（这正是截图里「任务标题/任务内容/提醒时间/优先级」
+        #   在英文模式下残留中文的根因）。
+        self.f_title_label = QLabel()
+        self.f_title_label.setObjectName("fieldLabel")
+        self.f_title_label.setTextFormat(Qt.TextFormat.RichText)
+        title_label = self.f_title_label
         title_label.setText(tr("任务标题") + ' <span style="color:#F97316;font-weight:700">*</span>')
-        title_label.setTextFormat(Qt.TextFormat.RichText)
         self.title_in = QLineEdit()
         self.title_in.setObjectName("titleInput")
         self.title_in.setPlaceholderText(tr("给任务起个标题，比如：完成季度复盘"))
@@ -836,8 +857,9 @@ class TodoWindow(QDialog):
         ac.addWidget(self.title_in)
 
         # 任务内容（富文本）
-        content_label = QLabel(tr("任务内容"))
-        content_label.setObjectName("fieldLabel")
+        self.f_content_label = QLabel(tr("任务内容"))
+        self.f_content_label.setObjectName("fieldLabel")
+        content_label = self.f_content_label
         self.editor = RichEditor()
         self.editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.editor_frame = QFrame()
@@ -863,8 +885,9 @@ class TodoWindow(QDialog):
         remind_col.setSpacing(6)
         remind_head = QHBoxLayout()
         remind_head.setSpacing(6)
-        rlab = QLabel(tr("提醒时间"))
-        rlab.setObjectName("fieldLabel")
+        self.f_remind_label = QLabel(tr("提醒时间"))
+        self.f_remind_label.setObjectName("fieldLabel")
+        rlab = self.f_remind_label
         # 与优先级列的表头等高，保证两列的「输入控件」起始 y 对齐
         rlab.setFixedHeight(24)
         # 滑动开关（对齐 index.html 的 .switch）
@@ -893,8 +916,9 @@ class TodoWindow(QDialog):
         # 优先级
         prio_col = QVBoxLayout()
         prio_col.setSpacing(6)
-        plab = QLabel(tr("优先级"))
-        plab.setObjectName("fieldLabel")
+        self.f_prio_label = QLabel(tr("优先级"))
+        self.f_prio_label.setObjectName("fieldLabel")
+        plab = self.f_prio_label
         plab.setFixedHeight(24)  # 与提醒列的表头等高（含开关），两列控件对齐
         prio_col.addWidget(plab)
         chips_row = QHBoxLayout()
@@ -945,6 +969,7 @@ class TodoWindow(QDialog):
         root.addWidget(self.add_panel)
 
         self._apply_responsive_margins()
+        self._apply_field_labels()   # 字段标签 + 编辑器文案统一由该方法落地（便于切语言复用）
         self._render()
 
     def _build_grips(self):
@@ -1062,6 +1087,10 @@ class TodoWindow(QDialog):
             )
         self.list_lay.addStretch(1)
         self._prune_stickies()
+        # 同步刷新常驻任务清单挂件（若已创建）
+        dock = getattr(self.ctx, "todo_dock", None)
+        if dock is not None:
+            dock.refresh()
 
     def refresh_external(self):
         """外部闹钟删除后刷新待办列表及当前提醒状态。"""
@@ -1099,6 +1128,13 @@ class TodoWindow(QDialog):
         for chip in self.chips:
             chip.setProperty("active", chip.text() == tr(prio))
             chip.style().polish(chip)
+        # 编辑已有任务时：若该任务便签已打开，实时预览呼吸灯颜色。
+        # 定稿在编辑结束时完成（保存→新色；返回/取消→按存储回退），见 _hide_editor。
+        task = getattr(self, "editing_task", None)
+        if task:
+            win = self.sticky_windows.get(task.get("id"))
+            if win is not None and hasattr(win, "preview_priority"):
+                win.preview_priority(prio)
 
     def _show_editor(self, task=None):
         self.editing_task = task
@@ -1147,6 +1183,7 @@ class TodoWindow(QDialog):
             self.remind_in.setDateTime(QDateTime.currentDateTime().addSecs(60))
 
     def _hide_editor(self):
+        edited_id = self.editing_task.get("id") if self.editing_task else None
         self.editing_task = None
         self.title_in.clear()
         self.editor.clear()
@@ -1165,6 +1202,31 @@ class TodoWindow(QDialog):
         self.set_title("📋 " + tr("任务清单"))
         self.setMinimumSize(*self._list_min)
         self.resize(*self._list_size)
+        # 编辑结束：让该任务的便签呼吸灯回到「存储里的真实优先级」——
+        # 保存 → 新优先级（_save 已写库）；返回/取消 → 旧优先级（回退实时预览）。
+        if edited_id is not None:
+            win = self.sticky_windows.get(edited_id)
+            if win is not None:
+                win.sync_state()
+
+    def _apply_field_labels(self):
+        """刷新添加/编辑页的字段标签（含必填星号）+ 富文本编辑器内部文案。
+
+        这些标签原先在 _build() 里用局部变量创建，切语言时无法被更新 →
+        英文模式下 「任务标题/任务内容/提醒时间/优先级」残留中文（用户截图问题）。
+        """
+        if hasattr(self, "f_title_label"):
+            self.f_title_label.setText(
+                tr("任务标题") + ' <span style="color:#F97316;font-weight:700">*</span>')
+        if hasattr(self, "f_content_label"):
+            self.f_content_label.setText(tr("任务内容"))
+        if hasattr(self, "f_remind_label"):
+            self.f_remind_label.setText(tr("提醒时间"))
+        if hasattr(self, "f_prio_label"):
+            self.f_prio_label.setText(tr("优先级"))
+        editor = getattr(self, "editor", None)
+        if editor is not None and hasattr(editor, "retranslate"):
+            editor.retranslate()
 
     def retranslate_ui(self):
         if self.add_panel.isVisible():
@@ -1176,7 +1238,8 @@ class TodoWindow(QDialog):
         self.del_b.setText(tr("删除"))
         self.back_b.setText(tr("返回"))
         self._apply_header_button_widths()
-        # 添加/编辑页文案
+        # 添加/编辑页文案（字段标签 + 富文本编辑器工具栏/占位）
+        self._apply_field_labels()
         self.title_in.setPlaceholderText(tr("给任务起个标题，比如：完成季度复盘"))
         self.cancel_b.setText(tr("取消"))
         self.save_b.setText(tr("保存任务"))
@@ -1184,6 +1247,10 @@ class TodoWindow(QDialog):
             chip.setText(tr(p))
             chip.setProperty("active", self.priority == p)
             chip.style().polish(chip)
+        # 已打开的便签卡片同步切语言（标题占位、工具栏、优先级呼吸灯提示）
+        for win in list(getattr(self, "sticky_windows", {}).values()):
+            if win is not None and hasattr(win, "retranslate_ui"):
+                win.retranslate_ui()
         self._render()
 
     def _edit_task(self, task):
@@ -1431,6 +1498,71 @@ class _StickyView(QGraphicsView):
         e.ignore()
 
 
+class PriorityPulseDot(QWidget):
+    """便签卡片左上角的「优先级呼吸灯」：小号实心圆 + 缓慢明暗/大小往复（呼吸灯效果）。
+
+    - 颜色按任务优先级：低=绿 / 中=橙 / 高=红（见 _PRIO_DOT_COLORS）。
+    - 呼吸曲线用 QPropertyAnimation 三关键帧 (0.25 → 1.0 → 0.25) + InOutSine，
+      循环无限；同时驱动「核心透明度」与「外圈柔光半径」，视觉上像一盏呼吸的指示灯。
+    - 设 WA_TransparentForMouseEvents：点击可穿过它落到卡片背景，
+      因此顶部栏仍可整条拖动（不因多了一个圆点而丢掉左上角的拖拽热区）。
+    """
+
+    _MIN, _MAX = 0.25, 1.0
+
+    def __init__(self, prio="中", diameter=12, parent=None):
+        super().__init__(parent)
+        self._d = diameter
+        self._color = QColor(_PRIO_DOT_COLORS.get(prio, _PRIO_DOT_COLORS["中"]))
+        self._pulse = self._MAX
+        self.setFixedSize(diameter, diameter)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        # 呼吸灯动画：父对象设为 self，随控件一起销毁，无泄漏
+        self._anim = QPropertyAnimation(self, b"pulse", self)
+        self._anim.setDuration(1800)
+        self._anim.setKeyValueAt(0.0, self._MIN)
+        self._anim.setKeyValueAt(0.5, self._MAX)
+        self._anim.setKeyValueAt(1.0, self._MIN)
+        self._anim.setLoopCount(-1)
+        self._anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._anim.start()
+
+    # --- 动画属性：0.25（最暗/最小）→ 1.0（最亮/最大） ---
+    def _get_pulse(self):
+        return self._pulse
+
+    def _set_pulse(self, value):
+        self._pulse = float(value)
+        self.update()
+
+    pulse = pyqtProperty(float, fget=_get_pulse, fset=_set_pulse)
+
+    def set_priority(self, prio):
+        """任务优先级变化时更新呼吸灯颜色。"""
+        self._color = QColor(_PRIO_DOT_COLORS.get(prio, _PRIO_DOT_COLORS["中"]))
+        self.update()
+
+    def paintEvent(self, e):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(Qt.PenStyle.NoPen)
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        t = (self._pulse - self._MIN) / (self._MAX - self._MIN)   # 0..1
+        # 外圈柔光：半径随呼吸微涨、透明度随呼吸增强
+        glow = QColor(self._color)
+        glow.setAlphaF(0.13 + 0.20 * t)
+        r_glow = self.width() * (0.40 + 0.10 * t)
+        p.setBrush(QBrush(glow))
+        p.drawEllipse(QRectF(cx - r_glow, cy - r_glow, r_glow * 2, r_glow * 2))
+        # 核心实心圆：透明度 0.55 → 1.0（呼吸主体）
+        core = QColor(self._color)
+        core.setAlphaF(0.55 + 0.45 * t)
+        r_core = self.width() * (0.27 + 0.06 * t)
+        p.setBrush(QBrush(core))
+        p.drawEllipse(QRectF(cx - r_core, cy - r_core, r_core * 2, r_core * 2))
+
+
 class StickyNoteWindow(QWidget):
     """便签式任务卡片窗口（对齐参考 HTML 的 #taskCard）。
 
@@ -1451,6 +1583,7 @@ class StickyNoteWindow(QWidget):
         self._locked = False
         self._drag = None  # 手动拖拽状态：{"start_global": QPoint, "start_pos": QPoint}
         self._done = bool(task.get("done", False))
+        self._prio = task.get("priority") or "中"   # 供左上角优先级呼吸灯取色
         self._rotate = 0
         self._bg = QColor("#fffaf5")  # 软件主题米色（默认背景）
 
@@ -1504,6 +1637,12 @@ class StickyNoteWindow(QWidget):
                 "QPushButton{background:transparent;border:none;padding:0;}"
                 "QPushButton:hover{background:rgba(0,0,0,0.06);border-radius:8px;}")
             b.installEventFilter(self)
+        # ★ 左上角优先级呼吸灯（低=绿 / 中=橙 / 高=红）：插在 stretch 之前 → 位于顶部栏
+        #   最左侧；三个操作按钮仍被 addStretch 顶在右侧，其余布局零改动。
+        #   圆点自身 WA_TransparentForMouseEvents，所以顶部栏整条仍可按下拖动。
+        self.dot = PriorityPulseDot(self._prio)
+        self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
+        bl.addWidget(self.dot)
         bl.addStretch(1)
         bl.addWidget(self.btn_complete)
         bl.addWidget(self.btn_pin)
@@ -1658,16 +1797,38 @@ class StickyNoteWindow(QWidget):
         if new:
             speak_later(config.character.system_func.get("todo", {}).get("complete", "嘻嘻，任务完成捏"))
 
+    def preview_priority(self, prio):
+        """编辑页实时预览：仅刷新左上角呼吸灯颜色与提示语，不改动其它状态。
+        定稿由 sync_state 完成——保存后按新值、返回/取消后按存储旧值回退。"""
+        self._prio = prio or self._prio
+        if getattr(self, "dot", None) is not None:
+            self.dot.set_priority(self._prio)
+            self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
+
     def sync_state(self):
-        """根据任务最新 done 状态刷新：标题删除线+颜色、确认键图标。"""
+        """根据任务最新 done 状态刷新：标题删除线+颜色、确认键图标、优先级呼吸灯。"""
         cur = todo.get_task(self.task_id)
         self._done = bool(cur["done"]) if cur else False
+        # 优先级可能被主窗口改过 → 呼吸灯颜色同步
+        self._prio = (cur or {}).get("priority") or self._prio
+        if getattr(self, "dot", None) is not None:
+            self.dot.set_priority(self._prio)
+            self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
         f = self.title.font()
         f.setStrikeOut(self._done)
         self.title.setFont(f)
         self.title.setStyleSheet(self._title_qss(self._done))
         self.btn_complete.setIcon(QIcon(self._btn_icon("complete", False)))
         self.btn_complete.setIconSize(QSize(20, 20))
+
+    def retranslate_ui(self):
+        """语言切换：刷新便签内文案（标题占位、编辑器工具栏/占位、呼吸灯提示）。"""
+        self.title.setPlaceholderText(tr("任务标题"))
+        if getattr(self, "dot", None) is not None:
+            self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
+        editor = getattr(self, "editor", None)
+        if editor is not None and hasattr(editor, "retranslate"):
+            editor.retranslate()
 
     def _title_qss(self, done):
         # HTML：text-xl(20px) font-medium(500) title-underline(2px #d8d8d8) pb-1(4px)

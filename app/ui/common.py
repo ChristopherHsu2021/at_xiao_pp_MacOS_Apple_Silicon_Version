@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 
 from app.core import assets
+import sys
+
 from app.core.i18n import tr
 from app.ui.style import GLASS_STYLE, COLOR
 
@@ -31,6 +33,29 @@ def popup_open():
                 or QApplication.activeModalWidget() is not None)
     except RuntimeError:
         return False
+
+
+def _mac_set_window_level(widget, floating):
+    """macOS 专属：置顶→NSFloatingWindowLevel；让路→NSNormalWindowLevel（保持可见、不隐藏）。
+
+    与 Windows 的 SetWindowPos(TOPMOST / NOTOPMOST) 在跨平台语义上对等：
+    - floating=True  等效于「所有软件顶层不被遮挡」；
+    - floating=False 等效于「点击其它软件就让路」，窗口降到普通层级但**不隐藏**。
+    其它平台（无 PyObjC）直接跳过，由各自原生分支处理。
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import objc
+        from ctypes import c_void_p
+        from AppKit import NSWindow, NSFloatingWindowLevel, NSNormalWindowLevel
+        nsview = objc.objc_object(c_void_p=int(widget.winId()))
+        nswindow = nsview.window()
+        if nswindow is not None:
+            nswindow.setLevel_(NSFloatingWindowLevel if floating else NSNormalWindowLevel)
+    except Exception:  # noqa: BLE001
+        # PyObjC 缺失 / 环境差异不应影响主流程
+        pass
 
 
 def keep_on_top(widget, bring_to_front=False, activate=False):
@@ -59,6 +84,8 @@ def keep_on_top(widget, bring_to_front=False, activate=False):
         ctypes.windll.user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, flags)
     except Exception:  # noqa: BLE001
         pass
+    # macOS：置顶到浮层层级（与 Windows 的 TOPMOST 对等）
+    _mac_set_window_level(widget, True)
 
 
 def promote_popup_topmost():
@@ -97,6 +124,8 @@ def release_topmost(widget):
         ctypes.windll.user32.SetWindowPos(hwnd, _HWND_NOTOPMOST, 0, 0, 0, 0, flags)
     except Exception:  # noqa: BLE001
         pass
+    # macOS：降到普通层级（让路、不隐藏），与 Windows 的 NOTOPMOST 对等
+    _mac_set_window_level(widget, False)
 
 
 class PeekCard(QWidget):

@@ -316,6 +316,28 @@ TRANSLATIONS = {
     "添加到我喜欢": ("加入到我喜歡", "Add to Favorites"),
     "触发成功捏！": ("觸發成功捏！", "Triggered!"),
     "时间到捏": ("時間到捏", "Time's up"),
+    # ------- 语言一致性补漏（扫描 tr() 调用发现缺失的 key，英文模式会回退成中文）-------
+    "暂无任务": ("暫無任務", "No tasks"),
+    "给任务起个标题，比如：完成季度复盘": ("給任務起個標題，比如：完成季度復盤", "Give the task a title, e.g. Quarterly review"),
+    "请先填写任务标题": ("請先填寫任務標題", "Please enter a task title"),
+    "任务标题为必填项": ("任務標題為必填項", "Task title is required"),
+    "卸载正在进行捏~": ("卸載正在進行捏~", "Uninstalling…"),
+    "卸载失败，请稍后再试": ("卸載失敗，請稍後再試", "Uninstall failed. Please try again."),
+    "AT小PP 已准备安装到此目录": ("AT小PP 已準備安裝到此目錄", "AT小PP will be installed to this folder"),
+    "安装正在进行捏~": ("安裝正在進行捏~", "Installing…"),
+    "安装失败，请稍后再试": ("安裝失敗，請稍後再試", "Installation failed. Please try again."),
+    "歌词前进 0.5 秒": ("歌詞前進 0.5 秒", "Lyrics +0.5s"),
+    "歌词后退 0.5 秒": ("歌詞後退 0.5 秒", "Lyrics −0.5s"),
+    "我喜欢的歌曲": ("我喜歡的歌曲", "My Favorites"),
+    "已取消我喜欢": ("已取消我喜歡", "Removed from Favorites"),
+    "无法连接音乐服务，请检查网络后重试": ("無法連接音樂服務，請檢查網路後重試", "Cannot reach the music service. Check your network and try again."),
+    "该歌曲暂无版权": ("該歌曲暫無版權", "Unavailable due to licensing"),
+    "播放出错噜": ("播放出錯嚕", "Playback error"),
+    "下载出错噜": ("下載出錯嚕", "Download error"),
+    # 富文本编辑器字体下拉的「分类名」（字体专名如 楷体/宋体/苹方 不翻译）
+    "无衬线": ("無襯線", "Sans-serif"),
+    "衬线": ("襯線", "Serif"),
+    "等宽": ("等寬", "Monospace"),
 }
 
 # 简->繁 兜底常用字表（仅覆盖本项目出现的字）

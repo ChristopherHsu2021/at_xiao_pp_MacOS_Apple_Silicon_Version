@@ -560,12 +560,17 @@ class RichEditor(QWidget):
         self._icon_color = icon_color
         self._btn_size = btn_size
 
+        # 记录「按钮 cmd → 未翻译的简体中文提示语」：语言切换时 retranslate() 需要它
+        # 逐个重新翻译（否则切语言后旧语言的工具提示会残留）。
+        self._cmd_tip_keys = {}
+
         def add_cmd(key, tooltip, compact_hide=False):
             if self._compact and compact_hide:
                 return None
             btn = QPushButton()
             btn.setObjectName("reBtn")
             btn.setToolTip(tr(tooltip))
+            self._cmd_tip_keys[key] = tooltip
             btn.setIcon(svg_icon(key, icon_sz, icon_color))
             btn.setIconSize(QSize(icon_sz, icon_sz))
             btn.setFixedSize(btn_size, btn_size)
@@ -651,9 +656,12 @@ class RichEditor(QWidget):
             self.sel_font.setMinimumWidth(72)
             self.sel_font.setMaximumWidth(100)
             self.sel_font.setMaxVisibleItems(14)
-            self.sel_font.addItem(FONT_PLACEHOLDER)
+            # 占位项也要跟随语言（原先写死简体中文 → 英文模式下显示「字体/字号」，
+            # 这正是「编辑任务页中英混杂」的一个根因）。
+            self.sel_font.addItem(tr(FONT_PLACEHOLDER))
             for label, fams in FONT_PRESETS:
-                self.sel_font.addItem(label, list(fams))
+                # 分类名（无衬线/衬线/等宽）跟随语言；字体专名（楷体/宋体…）不在表内 → 原样
+                self.sel_font.addItem(tr(label), list(fams))
             system_fonts = system_font_families()
             if system_fonts:
                 self.sel_font.insertSeparator(self.sel_font.count())
@@ -673,7 +681,7 @@ class RichEditor(QWidget):
             self.sel_size.setMinimumWidth(64)
             self.sel_size.setMaximumWidth(84)
             self.sel_size.setMaxVisibleItems(14)
-            self.sel_size.addItem(SIZE_PLACEHOLDER)
+            self.sel_size.addItem(tr(SIZE_PLACEHOLDER))
             for label, pt in size_choices():
                 self.sel_size.addItem(label, pt)
             self.sel_size.activated.connect(self._on_size)
@@ -1028,6 +1036,36 @@ class RichEditor(QWidget):
             self.sel_size.setCurrentIndex(0)
             self.sel_size.setToolTip(tr("字号"))
         self._sync_active()
+
+    def retranslate(self):
+        """语言切换后刷新编辑器内的全部界面文案。
+
+        覆盖：字体/字号下拉的「占位项」与预设分类名、工具栏各按钮提示、色板按钮提示、
+        编辑区占位文案。此前这些只在 __init__ 时取一次 tr()，切语言后旧语言文案会残留
+        —— 表现为「编辑任务页中英混杂」（截图里 字体 / 字号 两处没翻译）。
+        """
+        if hasattr(self, "sel_font"):
+            self.sel_font.setItemText(0, tr(FONT_PLACEHOLDER))
+            for i, (label, _fams) in enumerate(FONT_PRESETS, start=1):
+                if i < self.sel_font.count():
+                    self.sel_font.setItemText(i, tr(label))
+            self.sel_font.setToolTip(tr("字体"))
+        if hasattr(self, "sel_size"):
+            self.sel_size.setItemText(0, tr(SIZE_PLACEHOLDER))
+            self.sel_size.setToolTip(tr("字号"))
+        for key, btn in getattr(self, "_cmd_buttons", {}).items():
+            zh = getattr(self, "_cmd_tip_keys", {}).get(key)
+            if zh:
+                btn.setToolTip(tr(zh))
+        fore = getattr(self, "fore_btn", None)
+        if fore is not None:
+            fore.setToolTip(tr("文字颜色"))
+        hili = getattr(self, "hili_btn", None)
+        if hili is not None:
+            hili.setToolTip(tr("高亮/标记"))
+        self.editor.setPlaceholderText(
+            tr("在这里编辑任务详情") if self._compact
+            else tr("在这里填写任务详情，可用上方工具栏排版…（可选）"))
 
     def set_html(self, html: str):
         self.editor.setHtml(html or "")
