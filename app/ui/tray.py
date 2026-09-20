@@ -18,6 +18,7 @@ from app.core import config, assets
 from app.core.i18n import tr
 from app.ui.common import keep_on_top
 from app.ui.music_player import SlimSlider
+from app.ui.screen_fit import scale_qss
 
 
 def _make_icon() -> QIcon:
@@ -45,7 +46,7 @@ class TrayManager(QSystemTrayIcon):
         menu = QMenu()
         menu.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         menu.aboutToShow.connect(lambda m=menu: keep_on_top(m, bring_to_front=True))
-        menu.setStyleSheet(
+        menu.setStyleSheet(scale_qss(
             "QMenu{background:#fff;border:1px solid rgba(249,117,16,0.3);border-radius:10px;padding:6px;}"
             "QMenu::item{padding:7px 18px 7px 10px;border-radius:8px;color:#3d2b1f;font-size:13px;}"
             "QMenu::item:selected{background:rgba(249,117,16,0.14);color:#f97510;}"
@@ -53,7 +54,7 @@ class TrayManager(QSystemTrayIcon):
             "QLabel#trayDur{color:#a08e7a;font-size:11px;}"
             "QToolButton{border:0;padding:4px;min-width:28px;min-height:26px;}"
             "QToolButton:hover{background:rgba(249,117,16,0.14);border-radius:4px;}"
-        )
+        ))
         self.menu = menu
 
         # ---- 音乐播放控制条相关项（仅播放器窗口未关闭时动态插入） ----

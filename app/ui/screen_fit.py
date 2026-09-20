@@ -37,6 +37,40 @@ WINDOW_DEFAULTS = {
 WINDOW_MINS = dict(WINDOW_DEFAULTS)
 
 
+# ---------------------------------------------------------------------------
+# 全局 UI 等比缩放（2026-09-20）：窗口「内饰」（内边距 / 间距 / 字号 / 图标与控件
+# 固定尺寸 / 圆角 / 指示器 / 滚动条 / 右键菜单）随默认尺寸一起缩到 1440×900 基准的 80%。
+# 仅作用于「像素维度」，颜色 / 百分比 / 坐标 / 时长一律不碰。
+# ---------------------------------------------------------------------------
+import re as _re
+
+UI_SCALE = 0.8
+
+# 只匹配 px / pt 维度；rgba 颜色（逗号分隔小数）、百分比 N%、坐标、时长都不带 px/pt，安全。
+_QSS_DIM_RE = _re.compile(r"(\d+(?:\.\d+)?)(px|pt)\b")
+
+
+def s(value):
+    """把一个像素尺寸等比缩放到 UI_SCALE（0 保持不变；非 0 至少 1px，避免塌成 0）。"""
+    if value == 0:
+        return 0
+    return max(1, int(round(value * UI_SCALE)))
+
+
+def scale_qss(qss):
+    """把样式表里所有 px / pt 维度乘以 UI_SCALE；不动颜色、百分比、坐标等。
+
+    用于「内饰」等比缩放：字号、内边距、圆角、复选/开关指示器、滚动条、滑块、菜单样式等
+    全部随窗口一起缩小，视觉上才「整体成比例」。
+    """
+    def _rep(m):
+        v = float(m.group(1))
+        if v == 0:
+            return m.group(0)          # 0px 保持 0，避免被 s() 抬成 1px
+        return f"{s(v)}{m.group(2)}"
+    return _QSS_DIM_RE.sub(_rep, qss)
+
+
 def fit_window(widget, key, resizable=True, max_size=None):
     """按基准给窗口设置「默认大小 + 最小尺寸」并（macOS）开启边缘缩放。
 

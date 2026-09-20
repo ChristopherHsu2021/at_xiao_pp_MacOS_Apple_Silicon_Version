@@ -53,9 +53,10 @@ from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.context_menu import MENU_QSS
 from app.ui.mac_window import apply_stage_exempt, make_resizable
+from app.ui.screen_fit import scale_qss, s
 
 
-PLAYER_QSS = ("""
+PLAYER_QSS = scale_qss("""
 QWidget#playerCard {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.86);
@@ -400,7 +401,7 @@ def _parse_duration(path: str) -> str:
 class CoverWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.setFixedSize(54, 54)
+        self.setFixedSize(s(54), s(54))
         self._pixmap = QPixmap()
         self._path = None
         self._preview = None
@@ -684,7 +685,7 @@ class SvgIconWidget(QWidget):
         super().__init__()
         self._svg_text = svg_text
         self._color = color
-        self.setFixedSize(22, 22)
+        self.setFixedSize(s(22), s(22))
 
     def paintEvent(self, e):  # noqa: N802
         p = QPainter(self)
@@ -727,7 +728,7 @@ class LoopIcon(QWidget):
     def __init__(self, mode=0):
         super().__init__()
         self.mode = mode
-        self.setFixedSize(24, 24)
+        self.setFixedSize(s(24), s(24))
 
     def paintEvent(self, e):  # noqa: N802
         p = QPainter(self)
@@ -761,7 +762,7 @@ class VolumeIcon(QWidget):
     def __init__(self):
         super().__init__()
         self.mode = "volume_3"
-        self.setFixedSize(24, 24)
+        self.setFixedSize(s(24), s(24))
 
     def paintEvent(self, e):  # noqa: N802
         p = QPainter(self)
@@ -916,7 +917,7 @@ class SlimSlider(QWidget):
         self._dragging = False
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(16)
+        self.setFixedHeight(s(16))
 
     def setRange(self, min_v, max_v):  # noqa: N802
         self._min = min_v
@@ -1040,24 +1041,24 @@ class TrackItemWidget(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(TRACK_ROW_H)
         row = QHBoxLayout(self)
-        row.setContentsMargins(2, 0, 4, 0)
-        row.setSpacing(7)
+        row.setContentsMargins(s(2), s(0), s(4), s(0))
+        row.setSpacing(s(7))
 
         num = QLabel(number)
         num.setObjectName("trackNum")
-        num.setFixedWidth(16)
+        num.setFixedWidth(s(16))
         num.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.name_label = MarqueeLabel(title)
         name = self.name_label
         name.setObjectName("trackName")
         name.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        name.setMinimumWidth(0)
+        name.setMinimumWidth(s(0))
         name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         duration_l = QLabel(duration)
         duration_l.setObjectName("trackDuration")
-        duration_l.setFixedWidth(50)
-        duration_l.setMinimumWidth(50)
-        duration_l.setMaximumWidth(50)
+        duration_l.setFixedWidth(s(50))
+        duration_l.setMinimumWidth(s(50))
+        duration_l.setMaximumWidth(s(50))
         duration_l.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         duration_l.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -1066,7 +1067,7 @@ class TrackItemWidget(QWidget):
         row.addWidget(duration_l)
         self.fav_btn = QPushButton("♡")
         self.fav_btn.setObjectName("rowFav")
-        self.fav_btn.setFixedSize(20, 20)
+        self.fav_btn.setFixedSize(s(20), s(20))
         self.fav_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.fav_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
         self.fav_btn.clicked.connect(self._on_fav_clicked)
@@ -1074,7 +1075,7 @@ class TrackItemWidget(QWidget):
         row.addWidget(self.fav_btn)
         self.del_btn = QPushButton("×")
         self.del_btn.setObjectName("rowDel")
-        self.del_btn.setFixedSize(20, 20)
+        self.del_btn.setFixedSize(s(20), s(20))
         self.del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.del_btn.setToolTip(tr("删除"))
         self.del_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
@@ -1195,14 +1196,14 @@ class TrackItemWidget(QWidget):
             ctx.begin_popup_menu()
         menu = QMenu()
         try:
-            menu.setStyleSheet(MENU_QSS + """
+            menu.setStyleSheet(MENU_QSS + scale_qss("""
 QMenu { min-width: 82px; padding: 5px; }
 QMenu::item {
     min-width: 56px;
     padding: 7px 12px;
     font-size: 13px;
 }
-""")
+"""))
             menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
             menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             delete = None
@@ -1560,7 +1561,7 @@ class MarqueeLabel(QLabel):
         self._timer.setInterval(32)
         self._timer.timeout.connect(self._tick)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
-        self.setContentsMargins(0, 0, 0, 0)
+        self.setContentsMargins(s(0), s(0), s(0), s(0))
 
     def sizeHint(self):  # noqa: N802
         return QSize(24, max(TRACK_ROW_H, self.fontMetrics().height() + 4))
@@ -1855,12 +1856,12 @@ class LyricOverlayWindow(QDialog):
 
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
+        root.setSpacing(s(0))
 
         controls = QHBoxLayout()
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(0)
+        controls.setContentsMargins(s(0), s(0), s(0), s(0))
+        controls.setSpacing(s(0))
         controls.addStretch(1)
         self.loop_b = IconButton("loop", 30)
         self.prev_b = IconButton("prev", 30)
@@ -1878,10 +1879,10 @@ class LyricOverlayWindow(QDialog):
             b.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: transparent; border: none; }")
         for b in (self.font_up_b, self.font_down_b, self.lyric_plus_b, self.lyric_minus_b):
             b.setObjectName("toolBtn")
-            b.setFixedSize(48, 26)
+            b.setFixedSize(s(48), s(26))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            b.setStyleSheet("""
+            b.setStyleSheet(scale_qss("""
 QPushButton#toolBtn {
     background: transparent;
     border: none;
@@ -1892,7 +1893,7 @@ QPushButton#toolBtn {
     padding: 0;
 }
 QPushButton#toolBtn:hover { color: #ff9a3d; }
-""".replace("{ui_font}", UI_FONT_STACK))
+""".replace("{ui_font}", UI_FONT_STACK)))
         self._font_buttons = [self.font_up_b, self.font_down_b, self.lyric_plus_b, self.lyric_minus_b]
         self.loop_b.setToolTip(tr("循环模式"))
         self.prev_b.setToolTip(tr("上一首"))
@@ -1917,18 +1918,18 @@ QPushButton#toolBtn:hover { color: #ff9a3d; }
 
         self.palette = QWidget()
         palette_row = QHBoxLayout(self.palette)
-        palette_row.setContentsMargins(0, 0, 0, 0)
-        palette_row.setSpacing(8)
+        palette_row.setContentsMargins(s(0), s(0), s(0), s(0))
+        palette_row.setSpacing(s(8))
         palette_row.addStretch(1)
         for color in ("#f97510", "#4d96ff", "#ff5f8f", "#7bd88f", "#b990ff"):
             swatch = QPushButton()
-            swatch.setFixedSize(18, 18)
+            swatch.setFixedSize(s(18), s(18))
             swatch.setCursor(Qt.CursorShape.PointingHandCursor)
             swatch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            swatch.setStyleSheet(f"""
+            swatch.setStyleSheet(scale_qss(f"""
 QPushButton {{ background: {color}; border: 1px solid rgba(255,255,255,0.72); border-radius: 9px; }}
 QPushButton:hover {{ border: 2px solid #ffffff; }}
-""")
+"""))
             swatch.clicked.connect(lambda checked=False, c=color: self._set_color(c))
             palette_row.addWidget(swatch)
             self._swatches.append(swatch)
@@ -1945,7 +1946,7 @@ QPushButton:hover {{ border: 2px solid #ffffff; }}
     def _control_slot(self, button):
         slot = QWidget()
         layout = QHBoxLayout(slot)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(s(0), s(0), s(0), s(0))
         layout.addStretch(1)
         layout.addWidget(button)
         layout.addStretch(1)
@@ -1964,7 +1965,7 @@ QPushButton:hover {{ border: 2px solid #ffffff; }}
             b.setFixedSize(int(base * s), int(base * s))
         for b in self._font_buttons:
             b.setFixedSize(int(48 * s), int(28 * s))
-            b.setStyleSheet(f"""
+            b.setStyleSheet(scale_qss(f"""
 QPushButton#toolBtn {{
     background: transparent;
     border: none;
@@ -1975,7 +1976,7 @@ QPushButton#toolBtn {{
     padding: 0;
 }}
 QPushButton#toolBtn:hover {{ color: #ff9a3d; }}
-""")
+"""))
         for swatch in self._swatches:
             swatch.setFixedSize(int(18 * s), int(18 * s))
         self.lyric.setMinimumSize(int(560 * s), int(46 * s))
@@ -2178,26 +2179,26 @@ class PlayerWindow(QDialog):
 
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
         self.card = PlayerCard()
         self.card.setObjectName("playerCard")
         self.card.setStyleSheet(PLAYER_QSS)
         self.card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(self.card)
-        shadow.setBlurRadius(34)
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(s(34))
+        shadow.setOffset(s(0), s(8))
         shadow.setColor(QColor(180, 120, 50, 30))
         self.card.setGraphicsEffect(shadow)
         root.addWidget(self.card)
 
         body = QVBoxLayout(self.card)
-        body.setContentsMargins(18, 18, 18, 0)
-        body.setSpacing(0)
+        body.setContentsMargins(s(18), s(18), s(18), s(0))
+        body.setSpacing(s(0))
 
         win_row = QHBoxLayout()
-        win_row.setContentsMargins(0, 0, 0, 0)
+        win_row.setContentsMargins(s(0), s(0), s(0), s(0))
         win_row.addStretch(1)
-        win_row.setSpacing(6)
+        win_row.setSpacing(s(6))
         self.back_b = IconButton("back", 22)
         self.close_b = IconButton("close", 22)
         self.back_b.setToolTip(tr("最小化"))
@@ -2207,23 +2208,23 @@ class PlayerWindow(QDialog):
         win_row.addWidget(self.back_b)
         win_row.addWidget(self.close_b)
         body.addLayout(win_row)
-        body.addSpacing(4)
+        body.addSpacing(s(4))
 
         top = QHBoxLayout()
-        top.setSpacing(12)
+        top.setSpacing(s(12))
         self.cover = CoverWidget()
         meta = QVBoxLayout()
-        meta.setContentsMargins(0, 0, 0, 0)
-        meta.setSpacing(2)
+        meta.setContentsMargins(s(0), s(0), s(0), s(0))
+        meta.setSpacing(s(2))
         self.title = QLabel(tr("未在播放"))
         self.title.setObjectName("trackTitle")
-        self.title.setMinimumWidth(0)
+        self.title.setMinimumWidth(s(0))
         self.artist = QLabel(tr("用户音乐"))
         self.artist.setObjectName("artist")
-        self.artist.setMinimumWidth(0)
+        self.artist.setMinimumWidth(s(0))
         self.lyric = ClickableLyricLabel(_marked_lyric(tr("今天也想和你听完这一句")))
         self.lyric.setObjectName("lyricText")
-        self.lyric.setMinimumWidth(0)
+        self.lyric.setMinimumWidth(s(0))
         self.lyric.clicked.connect(self.music.toggle_lyric_overlay)
         meta.addWidget(self.title)
         meta.addWidget(self.artist)
@@ -2232,16 +2233,16 @@ class PlayerWindow(QDialog):
         top.addLayout(meta)
         top.addStretch(1)
         body.addLayout(top)
-        body.addSpacing(14)
+        body.addSpacing(s(14))
 
         self.prog = SlimSlider("#f97510")
         self.prog.setRange(0, 1000)
         self.prog.clicked.connect(self._seek_to_value)
         self.prog.sliderReleased.connect(self._seek)
         body.addWidget(self.prog)
-        body.addSpacing(4)
+        body.addSpacing(s(4))
         self.time_row = QHBoxLayout()
-        self.time_row.setContentsMargins(0, 0, 0, 0)
+        self.time_row.setContentsMargins(s(0), s(0), s(0), s(0))
         self.cur_t = QLabel("00:00")
         self.dur_t = QLabel("00:00")
         self.cur_t.setObjectName("timeText")
@@ -2250,10 +2251,10 @@ class PlayerWindow(QDialog):
         self.time_row.addStretch(1)
         self.time_row.addWidget(self.dur_t)
         body.addLayout(self.time_row)
-        body.addSpacing(13)
+        body.addSpacing(s(13))
 
         ctrl = QHBoxLayout()
-        ctrl.setSpacing(18)
+        ctrl.setSpacing(s(18))
         ctrl.addStretch(1)
         self.prev_b = IconButton("prev", 38)
         self.play_b = IconButton("play", 50)
@@ -2266,10 +2267,10 @@ class PlayerWindow(QDialog):
         ctrl.addWidget(self.next_b)
         ctrl.addStretch(1)
         body.addLayout(ctrl)
-        body.addSpacing(13)
+        body.addSpacing(s(13))
 
         bottom = QHBoxLayout()
-        bottom.setSpacing(10)
+        bottom.setSpacing(s(10))
         self.loop_b = IconButton("loop", 27)
         self.vol_icon = IconButton("volume", 22)
         self.vol = SlimSlider("#a08e7a")
@@ -2286,24 +2287,24 @@ class PlayerWindow(QDialog):
         bottom.addWidget(self.vol, 1)
         bottom.addWidget(self.list_b)
         body.addLayout(bottom)
-        body.addSpacing(8)
+        body.addSpacing(s(8))
 
         self.notice = NoticeLabel()
         self.notice.setObjectName("noticeText")
-        self.notice.setMinimumHeight(16)
+        self.notice.setMinimumHeight(s(16))
         self.notice.set_notice_text(tr("仅供学习交流使用，请支持正版音乐！"))
         body.addWidget(self.notice)
-        body.addSpacing(10)
+        body.addSpacing(s(10))
 
         self.playlist_panel = QWidget()
         self.playlist_panel.setObjectName("playlistPanel")
         panel = QVBoxLayout(self.playlist_panel)
-        panel.setContentsMargins(0, 11, 0, 0)
-        panel.setSpacing(9)
+        panel.setContentsMargins(s(0), s(11), s(0), s(0))
+        panel.setSpacing(s(9))
         self.search = QLineEdit()
         self.search.setObjectName("searchInput")
         self.search.setPlaceholderText(tr("搜索歌曲..."))
-        self.search.setFixedHeight(36)
+        self.search.setFixedHeight(s(36))
         self.search.returnPressed.connect(self.perform_search)
         self.search.textChanged.connect(self._on_search_changed)
         self.search_b = IconButton("search", 36)
@@ -2319,8 +2320,8 @@ class PlayerWindow(QDialog):
         self.favorite_b.setToolTip(tr("我喜欢的歌曲"))
         self.favorite_b.clicked.connect(self.music.toggle_favorite_mode)
         search_row = QHBoxLayout()
-        search_row.setContentsMargins(0, 0, 0, 0)
-        search_row.setSpacing(7)
+        search_row.setContentsMargins(s(0), s(0), s(0), s(0))
+        search_row.setSpacing(s(7))
         search_row.addWidget(self.search, 1)
         search_row.addWidget(self.search_b)
         search_row.addWidget(self.favorite_b)
@@ -2336,8 +2337,8 @@ class PlayerWindow(QDialog):
         self.playlist_body = QWidget()
         self.playlist_body.setObjectName("playlistBody")
         self.playlist_layout = QVBoxLayout(self.playlist_body)
-        self.playlist_layout.setContentsMargins(0, 0, 0, 18)
-        self.playlist_layout.setSpacing(0)
+        self.playlist_layout.setContentsMargins(s(0), s(0), s(0), s(18))
+        self.playlist_layout.setSpacing(s(0))
         self.list.setWidget(self.playlist_body)
         panel.addWidget(self.list, 1)
         self.playlist_panel.hide()
@@ -2349,8 +2350,8 @@ class PlayerWindow(QDialog):
         self.drop_overlay.setObjectName("dropOverlay")
         self.drop_overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(self.drop_overlay)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(s(22), s(20), s(22), s(20))
+        layout.setSpacing(s(12))
         layout.addStretch(1)
         self.drop_image = QLabel()
         self.drop_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2362,8 +2363,8 @@ class PlayerWindow(QDialog):
         layout.addWidget(self.drop_message)
         self.drop_buttons = QWidget()
         btn_row = QHBoxLayout(self.drop_buttons)
-        btn_row.setContentsMargins(0, 0, 0, 0)
-        btn_row.setSpacing(10)
+        btn_row.setContentsMargins(s(0), s(0), s(0), s(0))
+        btn_row.setSpacing(s(10))
         btn_row.addStretch(1)
         self.drop_yes_b = QPushButton(tr("是"))
         self.drop_yes_b.setObjectName("dropPrimary")

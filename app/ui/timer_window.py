@@ -11,10 +11,10 @@ from app.core import config
 from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.common import PeekCard
-from app.ui.screen_fit import fit_window
+from app.ui.screen_fit import fit_window, scale_qss, s
 
 
-TIMER_QSS = """
+TIMER_QSS = scale_qss("""
 QWidget#timerCard {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.60);
@@ -92,7 +92,7 @@ QPushButton#timerBack {
 QPushButton#timerBack:hover {
     background: rgba(249,117,16,0.08);
 }
-"""
+""")
 
 
 class OrangeBarButton(QPushButton):
@@ -161,8 +161,8 @@ class TimerWindow(QDialog):
 
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(0)
+        root.setContentsMargins(s(6), s(6), s(6), s(6))
+        root.setSpacing(s(0))
 
         self.card = PeekCard(self, scale=0.92)
         self.card.setObjectName("timerCard")
@@ -170,29 +170,29 @@ class TimerWindow(QDialog):
         self.card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.card.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         shadow = QGraphicsDropShadowEffect(self.card)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 7)
+        shadow.setBlurRadius(s(22))
+        shadow.setOffset(s(0), s(7))
         shadow.setColor(QColor(180, 120, 50, 32))
         self.card.setGraphicsEffect(shadow)
         root.addWidget(self.card)
 
         self.back_b = OrangeBarButton(self.card)
         self.back_b.setObjectName("timerBack")
-        self.back_b.setFixedSize(22, 18)
+        self.back_b.setFixedSize(s(22), s(18))
         self.back_b.setToolTip(tr("最小化"))
         self.back_b.clicked.connect(self.showMinimized)
         self.back_b.raise_()
 
         self.close_b = OrangeCloseButton(self.card)
         self.close_b.setObjectName("timerBack")
-        self.close_b.setFixedSize(22, 18)
+        self.close_b.setFixedSize(s(22), s(18))
         self.close_b.setToolTip(tr("关闭"))
         self.close_b.clicked.connect(self.close)
         self.close_b.raise_()
 
         card_lay = QVBoxLayout(self.card)
-        card_lay.setContentsMargins(0, 0, 0, 0)
-        card_lay.setSpacing(0)
+        card_lay.setContentsMargins(s(0), s(0), s(0), s(0))
+        card_lay.setSpacing(s(0))
 
         self.stack = QStackedWidget()
         card_lay.addWidget(self.stack)
@@ -211,18 +211,18 @@ class TimerWindow(QDialog):
         idle = QWidget()
         idle.setObjectName("timerPage")
         il = QVBoxLayout(idle)
-        il.setContentsMargins(28, 29, 28, 28)
-        il.setSpacing(0)
+        il.setContentsMargins(s(28), s(29), s(28), s(28))
+        il.setSpacing(s(0))
 
         self.idle_label = QLabel("⏱️ " + tr("设置时间"))
         self.idle_label.setObjectName("timerLabel")
         self.idle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         il.addWidget(self.idle_label)
-        il.addSpacing(21)
+        il.addSpacing(s(21))
 
         row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(11)
+        row.setContentsMargins(s(0), s(0), s(0), s(0))
+        row.setSpacing(s(11))
         row.addStretch(1)
         self.h = self._time_input("00")
         self.m = self._time_input("05")
@@ -234,12 +234,12 @@ class TimerWindow(QDialog):
         row.addWidget(self.s)
         row.addStretch(1)
         il.addLayout(row)
-        il.addSpacing(21)
+        il.addSpacing(s(21))
 
         start_row = QHBoxLayout()
         start_row.addStretch(1)
         self.start_b = OrangePillButton(tr("启动"))
-        self.start_b.setFixedSize(78, 39)
+        self.start_b.setFixedSize(s(78), s(39))
         self.start_b.clicked.connect(self._start)
         start_row.addWidget(self.start_b)
         start_row.addStretch(1)
@@ -251,36 +251,36 @@ class TimerWindow(QDialog):
         run = QWidget()
         run.setObjectName("timerPage")
         rl = QVBoxLayout(run)
-        rl.setContentsMargins(24, 29, 24, 27)
-        rl.setSpacing(0)
+        rl.setContentsMargins(s(24), s(29), s(24), s(27))
+        rl.setSpacing(s(0))
 
         self.run_label = QLabel("⏱️ " + tr("计时中"))
         self.run_label.setObjectName("timerLabel")
         self.run_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rl.addWidget(self.run_label)
-        rl.addSpacing(20)
+        rl.addSpacing(s(20))
 
         self.disp = QLabel("00:05:00")
         self.disp.setObjectName("timerDisplay")
         self.disp.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rl.addWidget(self.disp)
-        rl.addSpacing(20)
+        rl.addSpacing(s(20))
 
         self.total_l = QLabel(f"{tr('总时长')}：00:05:00")
         self.total_l.setObjectName("timerTotal")
         self.total_l.setAlignment(Qt.AlignmentFlag.AlignCenter)
         rl.addWidget(self.total_l)
-        rl.addSpacing(20)
+        rl.addSpacing(s(20))
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row.setSpacing(s(8))
         btn_row.addStretch(1)
         self.pause_b = QPushButton(tr("暂停"))
         self.cancel_b = QPushButton(tr("取消"))
         self.pause_b.setObjectName("timerPause")
         self.cancel_b.setObjectName("timerCancel")
-        self.pause_b.setFixedSize(81, 41)
-        self.cancel_b.setFixedSize(81, 41)
+        self.pause_b.setFixedSize(s(81), s(41))
+        self.cancel_b.setFixedSize(s(81), s(41))
         self.pause_b.clicked.connect(self._toggle_pause)
         self.cancel_b.clicked.connect(self._cancel)
         btn_row.addWidget(self.pause_b)
@@ -301,7 +301,7 @@ class TimerWindow(QDialog):
     def _time_input(self, value):
         edit = QLineEdit(value)
         edit.setObjectName("timerInput")
-        edit.setFixedSize(62, 48)
+        edit.setFixedSize(s(62), s(48))
         edit.setMaxLength(2)
         edit.setValidator(QIntValidator(0, 99, edit))
         edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -311,7 +311,7 @@ class TimerWindow(QDialog):
     def _sep(self):
         sep = QLabel(":")
         sep.setObjectName("timerSep")
-        sep.setFixedWidth(13)
+        sep.setFixedWidth(s(13))
         sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
         return sep
 

@@ -16,6 +16,7 @@ import sys
 from app.core.i18n import tr
 from app.ui.style import GLASS_STYLE, COLOR
 from app.ui.mac_window import apply_stage_exempt, make_resizable
+from app.ui.screen_fit import scale_qss, s
 
 # SetWindowPos 标志：NOSIZE(0x1) | NOMOVE(0x2) | NOACTIVATE(0x10) | SHOWWINDOW(0x40)
 _SWP_BASE = 0x0001 | 0x0002 | 0x0010 | 0x0040
@@ -212,27 +213,27 @@ class NoticeDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
-        self.setFixedSize(320, 190)
+        self.setFixedSize(s(320), s(190))
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(s(6), s(6), s(6), s(6))
         card = QWidget(self)
-        card.setStyleSheet(
+        card.setStyleSheet(scale_qss(
             "QWidget{background:#fffaf5;border:1px solid rgba(255,255,255,0.70);border-radius:18px;}"
             "QLabel#noticeTitle{color:#3d2b1f;font-size:16px;font-weight:800;}"
             "QLabel#noticeText{color:#8d7a68;font-size:12px;font-weight:600;}"
             "QPushButton#noticeBtn{background:#ff7613;border:1.5px solid #ff7613;border-radius:16px;color:#fff;font-size:12px;font-weight:700;padding:0 14px;}"
             "QPushButton#noticeBtn:hover{background:#ffa940;border-color:#ffa940;}"
-        )
+        ))
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(24)
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(s(24))
+        shadow.setOffset(0, s(8))
         shadow.setColor(QColor(180, 120, 50, 32))
         card.setGraphicsEffect(shadow)
         root.addWidget(card)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)
-        lay.setSpacing(12)
+        lay.setContentsMargins(s(22), s(20), s(22), s(18))
+        lay.setSpacing(s(12))
         title_l = QLabel(title)
         title_l.setObjectName("noticeTitle")
         title_l.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -246,7 +247,7 @@ class NoticeDialog(QDialog):
         row.addStretch(1)
         ok = QPushButton(tr("确定"))
         ok.setObjectName("noticeBtn")
-        ok.setFixedSize(72, 34)
+        ok.setFixedSize(s(72), s(34))
         ok.clicked.connect(self.accept)
         row.addWidget(ok)
         row.addStretch(1)
@@ -276,8 +277,8 @@ class GlassWindow(QDialog):
         self.container.setObjectName("GlassWindow")
         self.container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(self.container)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(s(22))
+        shadow.setOffset(0, s(8))
         shadow.setColor(QColor(180, 120, 50, 42))
         self.container.setGraphicsEffect(shadow)
         root.addWidget(self.container)
@@ -289,19 +290,19 @@ class GlassWindow(QDialog):
         # 标题栏
         bar = QWidget()
         bar.setObjectName("window-bar")
-        bar.setFixedHeight(46)
+        bar.setFixedHeight(s(46))
         bl = QHBoxLayout(bar)
-        bl.setContentsMargins(18, 0, 12, 0)
+        bl.setContentsMargins(s(18), 0, s(12), 0)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("window-title")
         bl.addWidget(self.title_label)
         bl.addStretch(1)
         close_btn = QPushButton("✕")
-        close_btn.setFixedSize(28, 28)
-        close_btn.setStyleSheet(
+        close_btn.setFixedSize(s(28), s(28))
+        close_btn.setStyleSheet(scale_qss(
             "QPushButton{background:transparent;border:none;color:#a08e7a;font-size:14px;}"
             "QPushButton:hover{color:#e53935;background:rgba(229,57,53,0.08);border-radius:8px;}"
-        )
+        ))
         close_btn.clicked.connect(self.close)
         bl.addWidget(close_btn)
         croot.addWidget(bar)
@@ -350,7 +351,7 @@ class GlassWindow(QDialog):
         super().closeEvent(e)
 
 
-UPLOAD_QSS = """
+UPLOAD_QSS = scale_qss("""
 QWidget#UploadCard {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.60);
@@ -380,7 +381,7 @@ QPushButton#uploadNo {
     font-weight: 800;
 }
 QPushButton#uploadNo:hover { background: rgba(249,117,16,0.10); color: #f97510; }
-"""
+""")
 
 
 class UploadPrompt(QDialog):
@@ -400,10 +401,10 @@ class UploadPrompt(QDialog):
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(300, 158)
+        self.setFixedSize(s(300), s(158))
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(s(6), s(6), s(6), s(6))
         root.setSpacing(0)
 
         self.card = PeekCard(self, scale=0.9)
@@ -411,16 +412,16 @@ class UploadPrompt(QDialog):
         self.card.setStyleSheet(UPLOAD_QSS)
         self.card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(self.card)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(s(22))
+        shadow.setOffset(0, s(8))
         shadow.setColor(QColor(180, 120, 50, 40))
         self.card.setGraphicsEffect(shadow)
         root.addWidget(self.card)
 
         card_lay = QVBoxLayout(self.card)
         # 底部留白避开 bubu 探头（右下角）
-        card_lay.setContentsMargins(20, 18, 20, 34)
-        card_lay.setSpacing(14)
+        card_lay.setContentsMargins(s(20), s(18), s(20), s(34))
+        card_lay.setSpacing(s(14))
 
         self.title_l = QLabel("")
         self.title_l.setObjectName("UploadTitle")
@@ -430,15 +431,15 @@ class UploadPrompt(QDialog):
         card_lay.addStretch(1)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(12)
+        btn_row.setSpacing(s(12))
         btn_row.addStretch(1)
         self.yes_b = QPushButton(tr("是"))
         self.yes_b.setObjectName("uploadYes")
-        self.yes_b.setFixedSize(84, 36)
+        self.yes_b.setFixedSize(s(84), s(36))
         self.yes_b.clicked.connect(lambda: self.accepted.emit())
         self.no_b = QPushButton(tr("否"))
         self.no_b.setObjectName("uploadNo")
-        self.no_b.setFixedSize(84, 36)
+        self.no_b.setFixedSize(s(84), s(36))
         self.no_b.clicked.connect(lambda: self.rejected.emit())
         btn_row.addWidget(self.yes_b)
         btn_row.addWidget(self.no_b)
@@ -471,17 +472,17 @@ class UploadPrompt(QDialog):
 # 为什么不用 QMenu：QMenu 自带原生图标与系统字体度量，无法复刻 HTML 的排版（左文案 + 右灰色
 # 快捷键），且颜色随系统主题漂移；而 QTextEdit 出厂会弹 Qt 原生英文菜单（Undo/Redo/...），
 # 与「软件语言设置」不一致。故统一用本类自绘。
-CTX_MENU_CARD_QSS = (
+CTX_MENU_CARD_QSS = scale_qss(
     "QWidget#ctxMenuCard{background:#ffffff;border:1px solid #e5e7eb;"
     "border-radius:8px;}"
 )
-CTX_MENU_ITEM_QSS = (
+CTX_MENU_ITEM_QSS = scale_qss(
     "QPushButton#ctxMenuItem{background:transparent;border:none;text-align:left;"
     "padding:0;}"
     "QPushButton#ctxMenuItem:hover{background:#f3f4f6;}"
 )
-CTX_MENU_TEXT_QSS = "background:transparent;font-size:13px;color:#3d2b1f;"
-CTX_MENU_SHORTCUT_QSS = "background:transparent;font-size:12px;color:#a3a3a3;"
+CTX_MENU_TEXT_QSS = scale_qss("background:transparent;font-size:13px;color:#3d2b1f;")
+CTX_MENU_SHORTCUT_QSS = scale_qss("background:transparent;font-size:12px;color:#a3a3a3;")
 
 # 原生编辑动作 + 快捷键提示（文案走 i18n，跟随软件「语言」设置）
 EDIT_MENU_ITEMS = ("撤销", "重做", None, "剪切", "复制", "粘贴", "删除", None, "全选")
@@ -504,8 +505,8 @@ class EditContextMenu(QWidget):
       （如便签菜单的「复制任务 / 清空内容 / 便签背景」）。
     """
 
-    CARD_WIDTH = 206     # 设计稿卡片宽
-    PAD = 14             # 投影留白（四周）
+    CARD_WIDTH = s(206)     # 设计稿卡片宽
+    PAD = s(14)             # 投影留白（四周）
 
     def __init__(self, parent=None, target=None):
         super().__init__(parent)
@@ -526,15 +527,15 @@ class EditContextMenu(QWidget):
         card.setStyleSheet(CTX_MENU_CARD_QSS)
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(16)
-        shadow.setOffset(0, 4)
+        shadow.setBlurRadius(s(16))
+        shadow.setOffset(0, s(4))
         shadow.setColor(QColor(0, 0, 0, 46))        # rgba(0,0,0,0.18)
         card.setGraphicsEffect(shadow)
         root.addWidget(card)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(4, 4, 4, 4)
-        lay.setSpacing(2)
+        lay.setContentsMargins(s(4), s(4), s(4), s(4))
+        lay.setSpacing(s(2))
 
         # 1) 原生编辑动作块（保留系统右键菜单的功能，文案走 i18n）
         for item in EDIT_MENU_ITEMS:
@@ -557,12 +558,12 @@ class EditContextMenu(QWidget):
         """一行菜单项：左侧文案，右侧灰色快捷键提示（QPushButton 承载 hover 底色）。"""
         b = QPushButton()
         b.setObjectName("ctxMenuItem")
-        b.setFixedHeight(34)
+        b.setFixedHeight(s(34))
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         b.setStyleSheet(CTX_MENU_ITEM_QSS)
         rl = QHBoxLayout(b)
-        rl.setContentsMargins(14, 0, 14, 0)
-        rl.setSpacing(8)
+        rl.setContentsMargins(s(14), 0, s(14), 0)
+        rl.setSpacing(s(8))
         t = QLabel(text)
         t.setStyleSheet(CTX_MENU_TEXT_QSS)
         t.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -580,10 +581,10 @@ class EditContextMenu(QWidget):
     def _separator():
         wrap = QWidget()
         wl = QVBoxLayout(wrap)
-        wl.setContentsMargins(8, 3, 8, 3)
+        wl.setContentsMargins(s(8), s(3), s(8), s(3))
         wl.setSpacing(0)
         line = QWidget()
-        line.setFixedHeight(1)
+        line.setFixedHeight(s(1))
         line.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         line.setStyleSheet("background:#ececec;")
         wl.addWidget(line)

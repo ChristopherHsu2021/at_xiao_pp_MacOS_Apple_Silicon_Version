@@ -15,8 +15,9 @@ from PyQt6.QtGui import QColor
 from app.core import config
 from app.core.i18n import tr
 from app.ui.common import keep_on_top
+from app.ui.screen_fit import scale_qss, s
 
-MENU_QSS = """
+MENU_QSS = scale_qss("""
 QMenu {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.82);
@@ -41,10 +42,10 @@ QMenu::item:active:selected {
 }
 QMenu::separator { height: 1px; background: rgba(249,117,16,0.14); margin: 4px 8px; }
 QMenu::right-arrow { width: 12px; height: 12px; padding-right: 4px; }
-"""
+""")
 
 
-ACTION_POPUP_QSS = """
+ACTION_POPUP_QSS = scale_qss("""
 QWidget#actionPopupCard {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.82);
@@ -64,7 +65,7 @@ QPushButton#actionPopupItem:hover {
     background: rgba(249,117,16,0.14);
     color: #f97510;
 }
-"""
+""")
 
 
 class ActionPopupMenu(QWidget):
@@ -73,8 +74,8 @@ class ActionPopupMenu(QWidget):
         self._actions = list(actions)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
-        width = max(104, max((len(text) for text, _callback in self._actions), default=2) * 16 + 34)
-        height = 12 + len(self._actions) * 34
+        width = max(s(104), max((len(text) for text, _callback in self._actions), default=2) * s(16) + s(34))
+        height = s(12) + len(self._actions) * s(34)
         self.setFixedSize(width, height)
 
         root = QVBoxLayout(self)
@@ -84,19 +85,19 @@ class ActionPopupMenu(QWidget):
         self.card.setStyleSheet(ACTION_POPUP_QSS)
         self.card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(self.card)
-        shadow.setBlurRadius(18)
-        shadow.setOffset(0, 6)
+        shadow.setBlurRadius(s(18))
+        shadow.setOffset(0, s(6))
         shadow.setColor(QColor(180, 120, 50, 34))
         self.card.setGraphicsEffect(shadow)
         root.addWidget(self.card)
 
         lay = QVBoxLayout(self.card)
-        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setContentsMargins(s(6), s(6), s(6), s(6))
         lay.setSpacing(0)
         for text, callback in self._actions:
             btn = QPushButton(text)
             btn.setObjectName("actionPopupItem")
-            btn.setFixedHeight(34)
+            btn.setFixedHeight(s(34))
             btn.clicked.connect(lambda _checked=False, cb=callback: self._trigger(cb))
             lay.addWidget(btn)
 

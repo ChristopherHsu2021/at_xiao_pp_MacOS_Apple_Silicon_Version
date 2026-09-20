@@ -29,12 +29,12 @@ from app.ui.common import (
     PeekCard, NoticeDialog, promote_popup_topmost,
     EditContextMenu, CTX_MENU_TEXT_QSS,
 )
-from app.ui.screen_fit import fit_window
+from app.ui.screen_fit import fit_window, scale_qss, s
 from app.ui.context_menu import ActionPopupMenu, ACTION_POPUP_QSS
 from app.ui.rich_editor import RichEditor, svg_icon
 
 
-WINDOW_QSS = """
+WINDOW_QSS = scale_qss("""
 QWidget#GlassWindow {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.60);
@@ -156,10 +156,10 @@ QPushButton#panelSave:hover {
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #FF8A2B,stop:1 #F0741F);
 }
 QPushButton#panelSave:pressed { background: #E0600E; }
-"""
+""")
 
 
-CHECK_QSS = """
+CHECK_QSS = scale_qss("""
 QCheckBox { spacing: 0px; }
 QCheckBox::indicator {
     width: 20px;
@@ -172,10 +172,10 @@ QCheckBox::indicator:checked {
     background: #ff7613;
     border-color: #ff7613;
 }
-"""
+""")
 
-LABEL_QSS = "font-size:13px;color:#3d2b1f;font-weight:500;"
-DONE_LABEL_QSS = "font-size:13px;color:#a08e7a;font-weight:500;text-decoration:line-through;"
+LABEL_QSS = scale_qss("font-size:13px;color:#3d2b1f;font-weight:500;")
+DONE_LABEL_QSS = scale_qss("font-size:13px;color:#a08e7a;font-weight:500;text-decoration:line-through;")
 # 列表行右侧信息标签（对齐 index.html 的 .tag / .tag.p-low / .tag.p-mid / .tag.p-high：
 # 小号圆角标签，低=绿 / 中=橙 / 高=红）。
 # 注意：QSS 的 border-radius 在大半径（如 999px）时会被 Qt 完全忽略（实测 8px 才生效），
@@ -229,7 +229,7 @@ class TagLabel(QLabel):
         self._glass = bool(glass)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.setContentsMargins(10, 3, 10, 3)
+        self.setContentsMargins(s(10), s(3), s(10), s(3))
 
     def set_colors(self, bg, fg):
         self._bg, self._fg = QColor(bg), QColor(fg)
@@ -407,7 +407,7 @@ class ElideLabel(QLabel):
         super().leaveEvent(event)
 
 
-CALENDAR_QSS = """
+CALENDAR_QSS = scale_qss("""
 QCalendarWidget QWidget#qt_calendar_navigationbar {
     background: #fff7ee;
     border: 1px solid rgba(249,117,16,0.16);
@@ -451,7 +451,7 @@ QCalendarWidget QAbstractItemView {
     selection-color: #f97510;
     outline: 0;
 }
-"""
+""")
 
 
 def speak_later(text):
@@ -497,7 +497,7 @@ class ToggleSwitch(QAbstractButton):
         super().__init__(parent)
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(42, 24)
+        self.setFixedSize(s(42), s(24))
         self.setStyleSheet("background:transparent;border:none;")
         self._offset = 0.0
         self._anim = QPropertyAnimation(self, b"offset", self)
@@ -554,7 +554,7 @@ class TodoCheckBox(QPushButton):
         super().__init__()
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(22, 22)
+        self.setFixedSize(s(22), s(22))
         self.setStyleSheet("QPushButton{background:transparent;border:none;padding:0;margin:0;}")
 
     def paintEvent(self, e):  # noqa: N802
@@ -679,8 +679,8 @@ class TaskRow(QWidget):
         else:
             self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 10, 8, 10)
-        lay.setSpacing(10)
+        lay.setContentsMargins(s(8), s(10), s(8), s(10))
+        lay.setSpacing(s(10))
         self.check = TodoCheckBox()
         self.check.setChecked(task["done"])
         self.check.toggled.connect(self._toggled)
@@ -700,8 +700,8 @@ class TaskRow(QWidget):
         prio = task.get("priority") or "中"
         self.meta = QWidget()
         meta_lay = QHBoxLayout(self.meta)
-        meta_lay.setContentsMargins(0, 0, 0, 0)
-        meta_lay.setSpacing(8)
+        meta_lay.setContentsMargins(s(0), s(0), s(0), s(0))
+        meta_lay.setSpacing(s(8))
         if due_text:
             meta_lay.addWidget(self._make_tag(due_text, TAG_BG, TAG_FG))
         # 优先级标签文字跟随语言（低/中/高 → Low/Medium/High）；配色仍按原始中文键查表，
@@ -824,29 +824,29 @@ class TodoWindow(QDialog):
 
     def _build(self):
         frame_root = QVBoxLayout(self)
-        frame_root.setContentsMargins(0, 0, 0, 0)
-        frame_root.setSpacing(0)
+        frame_root.setContentsMargins(s(0), s(0), s(0), s(0))
+        frame_root.setSpacing(s(0))
 
         self.container = PeekCard(self, scale=1.08)
         self.container.setObjectName("GlassWindow")
         self.container.setStyleSheet(WINDOW_QSS)
         shadow = QGraphicsDropShadowEffect(self.container)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(s(22))
+        shadow.setOffset(s(0), s(8))
         shadow.setColor(QColor(180, 120, 50, 32))
         self.container.setGraphicsEffect(shadow)
         frame_root.addWidget(self.container)
 
         outer = QVBoxLayout(self.container)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        outer.setContentsMargins(s(0), s(0), s(0), s(0))
+        outer.setSpacing(s(0))
 
         self.header = QWidget()
         self.header.setObjectName("window-bar")
-        self.header.setFixedHeight(58)
+        self.header.setFixedHeight(s(58))
         header_lay = QHBoxLayout(self.header)
-        header_lay.setContentsMargins(18, 0, 18, 0)
-        header_lay.setSpacing(6)
+        header_lay.setContentsMargins(s(18), s(0), s(18), s(0))
+        header_lay.setSpacing(s(6))
         self.title_label = QLabel("📋 " + tr("任务清单"))
         self.title_label.setObjectName("window-title")
         header_lay.addWidget(self.title_label)
@@ -855,8 +855,8 @@ class TodoWindow(QDialog):
         self.close_b = QPushButton()
         self.close_b.setObjectName("todoClose")
         self.close_b.setIcon(QIcon(svg_icon("close", 18, "#8A7358")))
-        self.close_b.setIconSize(QSize(18, 18))
-        self.close_b.setFixedSize(34, 34)
+        self.close_b.setIconSize(QSize(s(18), s(18)))
+        self.close_b.setFixedSize(s(34), s(34))
         self.close_b.setVisible(False)
         self.close_b.setToolTip(tr("返回"))
         self.close_b.clicked.connect(self._hide_editor)
@@ -870,7 +870,7 @@ class TodoWindow(QDialog):
         self.del_b.setObjectName("todoDanger")
         self.back_b.setObjectName("todoSecondary")
         for b in (self.sel_all, self.add_b, self.del_b, self.back_b):
-            b.setFixedHeight(32)
+            b.setFixedHeight(s(32))
         self._apply_header_button_widths()
         self.sel_all.clicked.connect(self._select_all)
         self.add_b.clicked.connect(self._toggle_add)
@@ -887,8 +887,8 @@ class TodoWindow(QDialog):
         self.body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer.addWidget(self.body, 1)
         root = QVBoxLayout(self.body)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
+        root.setSpacing(s(0))
 
         self.header.mousePressEvent = self._bar_press
         self.header.mouseMoveEvent = self._bar_move
@@ -902,8 +902,8 @@ class TodoWindow(QDialog):
         self.list_widget.setObjectName("task-list-widget")
         self.list_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.list_lay = QVBoxLayout(self.list_widget)
-        self.list_lay.setContentsMargins(12, 8, 12, 12)
-        self.list_lay.setSpacing(0)
+        self.list_lay.setContentsMargins(s(12), s(8), s(12), s(12))
+        self.list_lay.setSpacing(s(0))
         self.scroll.setWidget(self.list_widget)
         root.addWidget(self.scroll, 1)
 
@@ -913,8 +913,8 @@ class TodoWindow(QDialog):
         self.add_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.add_panel.setVisible(False)
         ap_root = QVBoxLayout(self.add_panel)
-        ap_root.setContentsMargins(0, 0, 0, 0)
-        ap_root.setSpacing(0)
+        ap_root.setContentsMargins(s(0), s(0), s(0), s(0))
+        ap_root.setSpacing(s(0))
 
         # 页面主体不放滚动区：表单整体随窗口缩放自适应，
         # 只有「任务内容」编辑区自身可滚动（满足“主体无滚动条、仅内容可滚动”）。
@@ -923,8 +923,8 @@ class TodoWindow(QDialog):
         ac = QVBoxLayout(self.add_content)
         # 内容框透明、整宽铺满：卜卜透过透明内容显示，不另起空白列（详见 PeekCard 的
         # 1/4 圆 + 45° 左上平移，使嘴巴/眼睛完整露出）。
-        ac.setContentsMargins(24, 18, 24, 6)
-        ac.setSpacing(16)
+        ac.setContentsMargins(s(24), s(18), s(24), s(6))
+        ac.setSpacing(s(16))
         self._narrow = None  # 窄宽度内边距状态缓存
 
         # 任务标题
@@ -939,7 +939,7 @@ class TodoWindow(QDialog):
         self.title_in = QLineEdit()
         self.title_in.setObjectName("titleInput")
         self.title_in.setPlaceholderText(tr("给任务起个标题，比如：完成季度复盘"))
-        self.title_in.setFixedHeight(44)
+        self.title_in.setFixedHeight(s(44))
         self.title_in.setMaxLength(80)
         self.title_in.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         ac.addWidget(title_label)
@@ -956,8 +956,8 @@ class TodoWindow(QDialog):
         self.editor_frame.setProperty("focused", False)
         self.editor_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         fl = QVBoxLayout(self.editor_frame)
-        fl.setContentsMargins(0, 0, 0, 0)
-        fl.setSpacing(0)
+        fl.setContentsMargins(s(0), s(0), s(0), s(0))
+        fl.setSpacing(s(0))
         fl.addWidget(self.editor)
         # 编辑区聚焦时高亮外框（Qt QSS 不支持 :focus-within，改用动态属性）
         self.editor.focusIn.connect(lambda: self._set_editor_focus(True))
@@ -967,18 +967,18 @@ class TodoWindow(QDialog):
 
         # 提醒时间 + 优先级
         meta = QHBoxLayout()
-        meta.setSpacing(16)
+        meta.setSpacing(s(16))
         self.meta_row = meta
         # 提醒
         remind_col = QVBoxLayout()
-        remind_col.setSpacing(6)
+        remind_col.setSpacing(s(6))
         remind_head = QHBoxLayout()
-        remind_head.setSpacing(6)
+        remind_head.setSpacing(s(6))
         self.f_remind_label = QLabel(tr("提醒时间"))
         self.f_remind_label.setObjectName("fieldLabel")
         rlab = self.f_remind_label
         # 与优先级列的表头等高，保证两列的「输入控件」起始 y 对齐
-        rlab.setFixedHeight(24)
+        rlab.setFixedHeight(s(24))
         # 滑动开关（对齐 index.html 的 .switch）
         self.remind_chk = ToggleSwitch()
         remind_head.addWidget(rlab)
@@ -995,7 +995,7 @@ class TodoWindow(QDialog):
         # 否则会被置顶的卡片窗口压住（即「年月日框被页面遮挡」）。
         self._calendar = calendar
         calendar.installEventFilter(self)
-        self.remind_in.setFixedHeight(40)
+        self.remind_in.setFixedHeight(s(40))
         self.remind_in.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.remind_in.setEnabled(False)
         self.remind_chk.toggled.connect(self._on_remind_toggled)
@@ -1004,21 +1004,21 @@ class TodoWindow(QDialog):
         meta.addLayout(remind_col, 1)
         # 优先级
         prio_col = QVBoxLayout()
-        prio_col.setSpacing(6)
+        prio_col.setSpacing(s(6))
         self.f_prio_label = QLabel(tr("优先级"))
         self.f_prio_label.setObjectName("fieldLabel")
         plab = self.f_prio_label
-        plab.setFixedHeight(24)  # 与提醒列的表头等高（含开关），两列控件对齐
+        plab.setFixedHeight(s(24))  # 与提醒列的表头等高（含开关），两列控件对齐
         prio_col.addWidget(plab)
         chips_row = QHBoxLayout()
-        chips_row.setSpacing(8)
+        chips_row.setSpacing(s(8))
         self.chips = []
         for p in ("低", "中", "高"):
             chip = QPushButton(tr(p))
             chip.setObjectName("todoChip")
             # 窄窗时也保证 chips 不被压扁（宽度不足时由提醒栏让位）
-            chip.setMinimumWidth(58)
-            chip.setFixedHeight(40)  # 与提醒时间输入框等高，两列底部对齐
+            chip.setMinimumWidth(s(58))
+            chip.setFixedHeight(s(40))  # 与提醒时间输入框等高，两列底部对齐
             chip.setProperty("prio", "low" if p == "低" else ("high" if p == "高" else "mid"))
             chip.setProperty("active", p == "中")
             chip.clicked.connect(lambda _=False, pp=p: self._on_chip(pp))
@@ -1034,19 +1034,19 @@ class TodoWindow(QDialog):
         self.footer = PanelFooter()
         footer = QHBoxLayout(self.footer)
         # 右侧内边距额外加卜卜半径：按钮整体左移，不压在卜卜露出区上
-        footer.setContentsMargins(24, 12, 24, 18)
-        footer.setSpacing(12)
+        footer.setContentsMargins(s(24), s(12), s(24), s(18))
+        footer.setSpacing(s(12))
         self.footer_lay = footer
         footer.addStretch(1)
         self.cancel_b = QPushButton(tr("取消"))
         self.save_b = QPushButton(tr("保存任务"))
         self.cancel_b.setObjectName("panelCancel")
         self.save_b.setObjectName("panelSave")
-        self.cancel_b.setFixedHeight(42)
-        self.save_b.setFixedHeight(42)
+        self.cancel_b.setFixedHeight(s(42))
+        self.save_b.setFixedHeight(s(42))
         # 不设最小宽度：窄窗（470）时按钮要能和右侧卜卜让位区共存，不互相挤压
-        self.cancel_b.setMinimumWidth(0)
-        self.save_b.setMinimumWidth(0)
+        self.cancel_b.setMinimumWidth(s(0))
+        self.save_b.setMinimumWidth(s(0))
         self.cancel_b.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_b.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_b.clicked.connect(self._hide_editor)
@@ -1166,7 +1166,7 @@ class TodoWindow(QDialog):
         tasks = todo.all_tasks()
         if not tasks:
             empty = QLabel(tr("暂无任务，点『添加』开始捏～"))
-            empty.setStyleSheet("color:#a08e7a;font-size:16px;padding:20px;")
+            empty.setStyleSheet(scale_qss("color:#a08e7a;font-size:16px;padding:20px;"))
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.list_lay.addWidget(empty)
         for t in tasks:
@@ -1540,8 +1540,8 @@ class StickyContextMenu(EditContextMenu):
         #    完整显示），第二行色块，两者左对齐。菜单高度由 show_at() 的 adjustSize() 自动增长。
         bg_row = QWidget()
         bl = QVBoxLayout(bg_row)
-        bl.setContentsMargins(14, 6, 10, 6)
-        bl.setSpacing(6)
+        bl.setContentsMargins(s(14), s(6), s(10), s(6))
+        bl.setSpacing(s(6))
         lbl = QLabel(tr("便签背景"))
         # 与上方菜单项（复制任务/清空内容/撤销…）字体样式保持一致：同为 CTX_MENU_TEXT_QSS(13px)，
         # 不再单独压成 12px（否则「便签背景」比其它项明显小一号）。
@@ -1549,15 +1549,15 @@ class StickyContextMenu(EditContextMenu):
         bl.addWidget(lbl)
         sw_row = QWidget()
         sl = QHBoxLayout(sw_row)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(6)
+        sl.setContentsMargins(s(0), s(0), s(0), s(0))
+        sl.setSpacing(s(6))
         for _name, col in STICKY_COLORS:
             sw = QPushButton()
-            sw.setFixedSize(18, 18)
+            sw.setFixedSize(s(18), s(18))
             sw.setCursor(Qt.CursorShape.PointingHandCursor)
             sw.setToolTip(tr(_name))
-            sw.setStyleSheet(
-                f"background:{col};border:1px solid #ccc;border-radius:9px;")
+            sw.setStyleSheet(scale_qss(
+                f"background:{col};border:1px solid #ccc;border-radius:9px;"))
             sw.clicked.connect(lambda _checked=False, c=col: self._set_bg(c))
             sl.addWidget(sw)
         sl.addStretch(1)
@@ -1700,15 +1700,15 @@ class StickyNoteWindow(QWidget):
         self.note.setObjectName("stickyNote")
         self.note.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         nl = QVBoxLayout(self.note)
-        nl.setContentsMargins(20, 20, 20, 20)   # HTML p-5 = 20px
-        nl.setSpacing(0)
+        nl.setContentsMargins(s(20), s(20), s(20), s(20))   # HTML p-5 = 20px
+        nl.setSpacing(s(0))
 
         # 顶部操作栏（同时也是拖拽手柄）
         self.bar = QWidget()
-        self.bar.setFixedHeight(24)
+        self.bar.setFixedHeight(s(24))
         bl = QHBoxLayout(self.bar)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(12)                        # HTML gap-3 = 12px
+        bl.setContentsMargins(s(0), s(0), s(0), s(0))
+        bl.setSpacing(s(12))                        # HTML gap-3 = 12px
         self.btn_complete = QPushButton()
         self.btn_pin = QPushButton()
         self.btn_close = QPushButton()
@@ -1717,14 +1717,14 @@ class StickyNoteWindow(QWidget):
                         (self.btn_close, "close")):
             b.setObjectName("stickyBtn")
             b.setProperty("role", role)
-            b.setFixedSize(24, 24)
+            b.setFixedSize(s(24), s(24))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setIcon(QIcon(self._btn_icon(role, False)))
-            b.setIconSize(QSize(20, 20))
+            b.setIconSize(QSize(s(20), s(20)))
             # 写入 :hover 以启用 WA_Hover，使事件过滤器能切换 hover 图标配色
-            b.setStyleSheet(
+            b.setStyleSheet(scale_qss(
                 "QPushButton{background:transparent;border:none;padding:0;}"
-                "QPushButton:hover{background:rgba(0,0,0,0.06);border-radius:8px;}")
+                "QPushButton:hover{background:rgba(0,0,0,0.06);border-radius:8px;}"))
             b.installEventFilter(self)
         # ★ 左上角优先级呼吸灯（低=绿 / 中=橙 / 高=红）：插在 stretch 之前 → 位于顶部栏
         #   最左侧；三个操作按钮仍被 addStretch 顶在右侧，其余布局零改动。
@@ -1737,15 +1737,15 @@ class StickyNoteWindow(QWidget):
         bl.addWidget(self.btn_pin)
         bl.addWidget(self.btn_close)
         nl.addWidget(self.bar)
-        nl.addSpacing(12)                         # HTML 顶部栏 mb-3 = 12px
+        nl.addSpacing(s(12))                         # HTML 顶部栏 mb-3 = 12px
 
         # 可编辑标题（text-xl 20px / font-medium / 下划线；完成时删除线 + 变灰）
         self.title = QLineEdit()
         self.title.setObjectName("stickyTitle")
         self.title.setPlaceholderText(tr("任务标题"))
-        self.title.setFixedHeight(36)
+        self.title.setFixedHeight(s(36))
         nl.addWidget(self.title)
-        nl.addSpacing(16)                         # HTML 标题 mb-4 = 16px
+        nl.addSpacing(s(16))                         # HTML 标题 mb-4 = 16px
 
         # 富文本任务内容（复用紧凑编辑器：单行 11 按钮工具栏）
         self.editor = RichEditor(compact=True)
@@ -1906,9 +1906,9 @@ class StickyNoteWindow(QWidget):
         f = self.title.font()
         f.setStrikeOut(self._done)
         self.title.setFont(f)
-        self.title.setStyleSheet(self._title_qss(self._done))
+        self.title.setStyleSheet(scale_qss(self._title_qss(self._done)))
         self.btn_complete.setIcon(QIcon(self._btn_icon("complete", False)))
-        self.btn_complete.setIconSize(QSize(20, 20))
+        self.btn_complete.setIconSize(QSize(s(20), s(20)))
 
     def retranslate_ui(self):
         """语言切换：刷新便签内文案（标题占位、编辑器工具栏/占位、呼吸灯提示）。"""
@@ -1934,7 +1934,7 @@ class StickyNoteWindow(QWidget):
     def toggle_pin(self):
         self._locked = not self._locked
         self.btn_pin.setIcon(QIcon(self._btn_icon("pin", False)))
-        self.btn_pin.setIconSize(QSize(20, 20))
+        self.btn_pin.setIconSize(QSize(s(20), s(20)))
 
     def _btn_icon(self, role, hovered):
         """三按钮图标（严格对齐 HTML 的 text-gray-600 / hover 配色 / 完成绿 / 置顶橙）。"""
@@ -1951,8 +1951,8 @@ class StickyNoteWindow(QWidget):
     def set_bg(self, color):
         self._bg = QColor(color)
         # HTML rounded-lg = 8px
-        self.note.setStyleSheet(
-            f"QWidget#stickyNote{{background:{self._bg.name()};border-radius:8px;}}")
+        self.note.setStyleSheet(scale_qss(
+            f"QWidget#stickyNote{{background:{self._bg.name()};border-radius:8px;}}"))
 
     # ---------- 右键菜单 ----------
     def _show_sticky_menu(self, event, target=None):

@@ -5,6 +5,8 @@
 
 import sys
 
+from app.ui.screen_fit import scale_qss
+
 # 平台相关字体栈：macOS 没有 Microsoft YaHei，引用它会触发 Qt 每次启动弹出
 # "Replace uses of missing font family" 警告并多耗 ~500ms。按平台选首选字体，
 # 既消除告警、又保证各平台用上原生中文字体。
@@ -18,7 +20,7 @@ else:
     PRIMARY_FONT = "Noto Sans CJK SC"
     UI_FONT_STACK = "'Noto Sans CJK SC', 'WenQuanYi Micro Hei', sans-serif"
 
-QSS = ("""
+QSS = scale_qss("""
 /* ===== 全局 ===== */
 QWidget {
     font-family: {ui_font};
@@ -107,7 +109,7 @@ COLOR = {
     "glass": "rgba(255,255,255,0.92)",
 }
 
-GLASS_STYLE = (
+GLASS_STYLE = scale_qss(
     "background: #fffaf5; border: 1px solid rgba(249,117,16,0.18);"
     " border-radius: 20px;"
 )

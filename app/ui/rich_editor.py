@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 
 from app.ui.common import promote_popup_topmost, EditContextMenu
 from app.core.i18n import tr
+from app.ui.screen_fit import scale_qss, s
 
 # 工具栏图标（与 index.html 同源 SVG path，统一描边风格）
 _ICONS = {
@@ -499,7 +500,7 @@ class FlowToolbar(QFrame):
         super().__init__(parent)
         self.setObjectName("reToolbar")
         self.flow = FlowLayout(self)
-        self.flow.setContentsMargins(10, 8, 10, 8)
+        self.flow.setContentsMargins(s(10), s(8), s(10), s(8))
         policy = self.sizePolicy()
         policy.setHeightForWidth(True)
         policy.setVerticalPolicy(QSizePolicy.Policy.Minimum)
@@ -543,8 +544,8 @@ class RichEditor(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
+        root.setSpacing(s(0))
 
         # ---- 工具栏（窄宽度自动换行，保证按钮全部可见） ----
         self.toolbar = FlowToolbar()
@@ -617,16 +618,16 @@ class RichEditor(QWidget):
             else:
                 self.fore_btn.setObjectName("reColor")
                 self.fore_btn.setIcon(QIcon(swatch_pixmap(18, self._fore_color)))
-                self.fore_btn.setIconSize(QSize(18, 18))
+                self.fore_btn.setIconSize(QSize(s(18), s(18)))
                 self.hili_btn.setObjectName("reHili")
                 self.hili_btn.setIcon(svg_icon("hili", 17, "#8A7358"))
-                self.hili_btn.setIconSize(QSize(17, 17))
+                self.hili_btn.setIconSize(QSize(s(17), s(17)))
             tb.addWidget(self.fore_btn)
             tb.addWidget(self.hili_btn)
 
         if self._compact:
             # 参考 HTML 工具栏顺序：B I U S · 项目符号 编号 · 左 中 · 字色 高亮 · 清除
-            tb.setContentsMargins(0, 12, 0, 0)   # 对齐 HTML 的 border-t pt-3
+            tb.setContentsMargins(s(0), s(12), s(0), s(0))   # 对齐 HTML 的 border-t pt-3
             add_cmd("bold", "加粗")
             add_cmd("italic", "斜体")
             add_cmd("underline", "下划线")
@@ -651,10 +652,10 @@ class RichEditor(QWidget):
             self.sel_font.setObjectName("reSelect")
             self.sel_font.setToolTip(tr("字体"))
             self.sel_font.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            self.sel_font.setFixedHeight(32)
+            self.sel_font.setFixedHeight(s(32))
             # 收窄：字体名放不下时显示「…」，悬停自动滑动展示全文
-            self.sel_font.setMinimumWidth(72)
-            self.sel_font.setMaximumWidth(100)
+            self.sel_font.setMinimumWidth(s(72))
+            self.sel_font.setMaximumWidth(s(100))
             self.sel_font.setMaxVisibleItems(14)
             # 占位项也要跟随语言（原先写死简体中文 → 英文模式下显示「字体/字号」，
             # 这正是「编辑任务页中英混杂」的一个根因）。
@@ -676,10 +677,10 @@ class RichEditor(QWidget):
             self.sel_size.setObjectName("reSelect")
             self.sel_size.setToolTip(tr("字号"))
             self.sel_size.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            self.sel_size.setFixedHeight(32)
+            self.sel_size.setFixedHeight(s(32))
             # 与字体框同步收窄（字号文案短，够用即可）
-            self.sel_size.setMinimumWidth(64)
-            self.sel_size.setMaximumWidth(84)
+            self.sel_size.setMinimumWidth(s(64))
+            self.sel_size.setMaximumWidth(s(84))
             self.sel_size.setMaxVisibleItems(14)
             self.sel_size.addItem(tr(SIZE_PLACEHOLDER))
             for label, pt in size_choices():
@@ -724,7 +725,7 @@ class RichEditor(QWidget):
 
         # 紧凑模式：内容下方依次是 16px 间距（HTML 内容 mb-4）+ 工具栏（border-t pt-3）
         if self._compact:
-            root.addSpacing(16)
+            root.addSpacing(s(16))
             root.addWidget(self.toolbar)
 
         self.setStyleSheet(EDITOR_QSS_COMPACT if self._compact else EDITOR_QSS)
@@ -814,7 +815,7 @@ class RichEditor(QWidget):
     def _sep(layout):
         line = QFrame()
         line.setObjectName("reSep")
-        line.setFixedSize(1, 20)
+        line.setFixedSize(s(1), s(20))
         layout.addWidget(line)
 
     # ---------- 命令处理 ----------
@@ -1085,7 +1086,7 @@ class RichEditor(QWidget):
 
 # 紧凑模式（便签卡片）样式：中性灰白视图；hover / 激活态改用与任务清单页
 # 「全选」按钮 hover 一致的淡橙底（rgba(249,117,16,0.08) + #f97510），图标由代码重绘。
-EDITOR_QSS_COMPACT = """
+EDITOR_QSS_COMPACT = scale_qss("""
 QFrame#reToolbar {
     background: transparent; border: none; border-top: 1px solid #e5e7eb;
 }
@@ -1113,10 +1114,10 @@ QTextEdit#reEditor QScrollBar::add-line:vertical,
 QTextEdit#reEditor QScrollBar::sub-line:vertical { height: 0; }
 QTextEdit#reEditor QScrollBar::add-page:vertical,
 QTextEdit#reEditor QScrollBar::sub-page:vertical { background: transparent; }
-"""
+""")
 
 
-EDITOR_QSS = """
+EDITOR_QSS = scale_qss("""
 QFrame#reToolbar {
     background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #FFFDF8,stop:1 #FFF9F0);
     border-bottom: 1px solid #F1E4D3;
@@ -1176,7 +1177,7 @@ QTextEdit#reEditor QScrollBar::add-line:vertical,
 QTextEdit#reEditor QScrollBar::sub-line:vertical { height:0; }
 QTextEdit#reEditor QScrollBar::add-page:vertical,
 QTextEdit#reEditor QScrollBar::sub-page:vertical { background:transparent; }
-"""
+""")
 
 
 # ============ 紧凑取色弹窗（替代 Windows 原生 QColorDialog） ============
@@ -1189,7 +1190,7 @@ COLOR_PALETTE = [
     "#a64d79", "#8e7cc3", "#674ea7", "#cc4125", "#e06666", "#f6b26b", "#ffd966", "#93c47d",
 ]
 
-COLOR_POPUP_QSS = """
+COLOR_POPUP_QSS = scale_qss("""
 QWidget#colorPopupCard { background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; }
 QPushButton#colorPopupCustom {
     background:transparent; border:1px solid #e5e7eb; border-radius:6px;
@@ -1198,7 +1199,7 @@ QPushButton#colorPopupCustom {
 QPushButton#colorPopupCustom:hover {
     background:rgba(249,117,16,0.08); color:#f97510; border-color:rgba(249,117,16,0.30);
 }
-"""
+""")
 
 
 class ColorPopup(QWidget):
@@ -1217,38 +1218,38 @@ class ColorPopup(QWidget):
         self._initial = QColor(initial) if initial is not None else QColor("#F97316")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
         card = QWidget()
         card.setObjectName("colorPopupCard")
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(COLOR_POPUP_QSS)
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(16)
-        shadow.setOffset(0, 4)
+        shadow.setBlurRadius(s(16))
+        shadow.setOffset(s(0), s(4))
         shadow.setColor(QColor(0, 0, 0, 46))
         card.setGraphicsEffect(shadow)
         root.addWidget(card)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 10, 10, 10)
-        lay.setSpacing(8)
+        lay.setContentsMargins(s(10), s(10), s(10), s(10))
+        lay.setSpacing(s(8))
         grid = QGridLayout()
-        grid.setSpacing(4)
+        grid.setSpacing(s(4))
         cols = 8
         for i, hexv in enumerate(COLOR_PALETTE):
             sw = QPushButton()
-            sw.setFixedSize(18, 18)
+            sw.setFixedSize(s(18), s(18))
             sw.setCursor(Qt.CursorShape.PointingHandCursor)
-            sw.setStyleSheet(
+            sw.setStyleSheet(scale_qss(
                 f"QPushButton{{background:{hexv};border:1px solid rgba(0,0,0,0.15);border-radius:4px;}}"
-                f"QPushButton:hover{{border:2px solid #F97510;}}")
+                f"QPushButton:hover{{border:2px solid #F97510;}}"))
             sw.clicked.connect(lambda _=False, c=hexv: self._pick(QColor(c)))
             grid.addWidget(sw, i // cols, i % cols)
         lay.addLayout(grid)
 
         cust = QPushButton(tr("自定义…"))
         cust.setObjectName("colorPopupCustom")
-        cust.setFixedHeight(28)
+        cust.setFixedHeight(s(28))
         cust.setCursor(Qt.CursorShape.PointingHandCursor)
         cust.clicked.connect(self._custom)
         lay.addWidget(cust)

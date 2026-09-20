@@ -24,6 +24,7 @@ from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from app.core import assets, config, pathutil
 from app.core.i18n import tr
 from app.core.voice import say
+from app.ui.screen_fit import scale_qss, s
 
 APP_NAME = config.character.app_name
 REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -136,7 +137,7 @@ def show_running_warning(message: str):
     dlg = InstallNoticeDialog(None, message)
     dlg.exec()
 
-INSTALL_QSS = """
+INSTALL_QSS = scale_qss("""
 QWidget#InstallWindow {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.70);
@@ -360,7 +361,7 @@ QLabel#successIcon {
     font-size: 34px;
     font-weight: 800;
 }
-"""
+""")
 
 
 def _source_dir() -> str:

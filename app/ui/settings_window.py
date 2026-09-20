@@ -15,13 +15,13 @@ from app.core import admin_auth, config, pathutil, voice_media
 from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.common import PeekCard
-from app.ui.screen_fit import fit_window
+from app.ui.screen_fit import fit_window, scale_qss, s
 
 
 LANGS = [("简体中文", "zh-CN"), ("繁體中文", "zh-TW"), ("English", "en")]
 
 
-SETTINGS_QSS = """
+SETTINGS_QSS = scale_qss("""
 QWidget#settingsCard {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.60);
@@ -196,7 +196,7 @@ QWidget#dialogCard {
     border: 1px solid rgba(255,255,255,0.70);
     border-radius: 18px;
 }
-"""
+""")
 
 
 class VoiceGenerateWorker(QObject):
@@ -222,22 +222,22 @@ class StyledMessageDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
-        self.setFixedSize(292, 168)
+        self.setFixedSize(s(292), s(168))
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(s(6), s(6), s(6), s(6))
         card = QWidget(self)
         card.setObjectName("dialogCard")
         card.setStyleSheet(SETTINGS_QSS)
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 7)
+        shadow.setBlurRadius(s(22))
+        shadow.setOffset(s(0), s(7))
         shadow.setColor(QColor(180, 120, 50, 32))
         card.setGraphicsEffect(shadow)
         root.addWidget(card)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)
-        lay.setSpacing(10)
+        lay.setContentsMargins(s(22), s(20), s(22), s(18))
+        lay.setSpacing(s(10))
         title_l = QLabel(tr(title))
         title_l.setObjectName("dialogTitle")
         title_l.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -251,7 +251,7 @@ class StyledMessageDialog(QDialog):
         row.addStretch(1)
         ok_b = QPushButton(tr("确定"))
         ok_b.setObjectName("primaryBtn")
-        ok_b.setFixedSize(70, 32)
+        ok_b.setFixedSize(s(70), s(32))
         ok_b.clicked.connect(self.accept)
         row.addWidget(ok_b)
         row.addStretch(1)
@@ -264,22 +264,22 @@ class AdminPasswordDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setModal(True)
-        self.setFixedSize(322, 198)
+        self.setFixedSize(s(322), s(198))
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(s(6), s(6), s(6), s(6))
         card = QWidget(self)
         card.setObjectName("dialogCard")
         card.setStyleSheet(SETTINGS_QSS)
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 7)
+        shadow.setBlurRadius(s(22))
+        shadow.setOffset(s(0), s(7))
         shadow.setColor(QColor(180, 120, 50, 32))
         card.setGraphicsEffect(shadow)
         root.addWidget(card)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 20, 22, 18)
-        lay.setSpacing(10)
+        lay.setContentsMargins(s(22), s(20), s(22), s(18))
+        lay.setSpacing(s(10))
         title = QLabel(tr("权限验证"))
         title.setObjectName("dialogTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -289,20 +289,20 @@ class AdminPasswordDialog(QDialog):
         self.password = QLineEdit()
         self.password.setObjectName("adminPassword")
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password.setFixedHeight(36)
+        self.password.setFixedHeight(s(36))
         self.password.returnPressed.connect(self.accept)
         lay.addWidget(title)
         lay.addWidget(tip)
         lay.addWidget(self.password)
         row = QHBoxLayout()
-        row.setSpacing(8)
+        row.setSpacing(s(8))
         row.addStretch(1)
         cancel_b = QPushButton(tr("取消"))
         ok_b = QPushButton(tr("确定"))
         cancel_b.setObjectName("secondaryBtn")
         ok_b.setObjectName("primaryBtn")
-        cancel_b.setFixedSize(64, 32)
-        ok_b.setFixedSize(64, 32)
+        cancel_b.setFixedSize(s(64), s(32))
+        ok_b.setFixedSize(s(64), s(32))
         cancel_b.clicked.connect(self.reject)
         ok_b.clicked.connect(self.accept)
         row.addWidget(cancel_b)
@@ -317,7 +317,7 @@ class Switch(QPushButton):
     def __init__(self, on=True):
         super().__init__()
         self._on = bool(on)
-        self.setFixedSize(44, 24)
+        self.setFixedSize(s(44), s(24))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet("QPushButton{background:transparent;border:none;padding:0;margin:0;}")
         self.clicked.connect(self._toggle)
@@ -366,8 +366,8 @@ class SettingsWindow(QDialog):
 
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
+        root.setSpacing(s(0))
 
         self.card = PeekCard(self, scale=1.16)
         self.card.setObjectName("settingsCard")
@@ -376,8 +376,8 @@ class SettingsWindow(QDialog):
         root.addWidget(self.card)
 
         card_lay = QVBoxLayout(self.card)
-        card_lay.setContentsMargins(0, 0, 0, 0)
-        card_lay.setSpacing(0)
+        card_lay.setContentsMargins(s(0), s(0), s(0), s(0))
+        card_lay.setSpacing(s(0))
         card_lay.addWidget(self._bar())
 
         self.stack = QStackedWidget()
@@ -385,8 +385,8 @@ class SettingsWindow(QDialog):
         body = QWidget()
         body.setObjectName("settingsBody")
         body_l = QVBoxLayout(body)
-        body_l.setContentsMargins(0, 8, 0, 10)
-        body_l.setSpacing(0)
+        body_l.setContentsMargins(s(0), s(8), s(0), s(10))
+        body_l.setSpacing(s(0))
 
         self.autostart = Switch(config.settings.get("autostart", True))
         body_l.addWidget(self._row("开机自启动", "系统启动时自动运行 AT小PP", self.autostart))
@@ -396,13 +396,13 @@ class SettingsWindow(QDialog):
         self.vol = QSlider(Qt.Orientation.Horizontal)
         self.vol.setRange(0, 100)
         self.vol.setValue(config.settings.get("volume", 50))
-        self.vol.setFixedWidth(150)
+        self.vol.setFixedWidth(s(150))
         body_l.addWidget(self._row("音量大小", "语音播报与音乐音量", self.vol))
 
         self.size = QSlider(Qt.Orientation.Horizontal)
         self.size.setRange(50, 150)
         self.size.setValue(config.settings.get("sizeScale", 100))
-        self.size.setFixedWidth(150)
+        self.size.setFixedWidth(s(150))
         body_l.addWidget(self._row("画面大小", "桌面角色的显示尺寸", self.size))
 
         body_l.addWidget(self._row("工作时间", "该时段默认显示工作状态", self._work_time_controls()))
@@ -419,9 +419,9 @@ class SettingsWindow(QDialog):
     def _bar(self):
         bar = QWidget()
         bar.setObjectName("windowBar")
-        bar.setFixedHeight(58)
+        bar.setFixedHeight(s(58))
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(18, 0, 18, 0)
+        lay.setContentsMargins(s(18), s(0), s(18), s(0))
         self.title_label = QLabel("⚙️ " + tr("设置"))
         self.title_label.setObjectName("windowTitle")
         lay.addWidget(self.title_label)
@@ -435,11 +435,11 @@ class SettingsWindow(QDialog):
         row.setObjectName("settingRow")
         row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QHBoxLayout(row)
-        lay.setContentsMargins(18, 14, 18, 14)
-        lay.setSpacing(16)
+        lay.setContentsMargins(s(18), s(14), s(18), s(14))
+        lay.setSpacing(s(16))
         info = QVBoxLayout()
-        info.setContentsMargins(0, 0, 0, 0)
-        info.setSpacing(2)
+        info.setContentsMargins(s(0), s(0), s(0), s(0))
+        info.setSpacing(s(2))
         name_l = QLabel(tr(name))
         name_l.setObjectName("settingName")
         desc_l = QLabel(tr(desc))
@@ -454,18 +454,18 @@ class SettingsWindow(QDialog):
     def _lang_tabs(self):
         wrap = QWidget()
         wrap.setObjectName("langTabs")
-        wrap.setStyleSheet(
+        wrap.setStyleSheet(scale_qss(
             "QWidget#langTabs{background:rgba(249,117,16,0.06);border-radius:20px;}"
-        )
+        ))
         lay = QHBoxLayout(wrap)
-        lay.setContentsMargins(3, 3, 3, 3)
-        lay.setSpacing(4)
+        lay.setContentsMargins(s(3), s(3), s(3), s(3))
+        lay.setSpacing(s(4))
         self.lang_btns = []
         for label, code in LANGS:
             btn = QPushButton(label)
             btn.setObjectName("langTab")
             btn.setCheckable(True)
-            btn.setFixedHeight(34)
+            btn.setFixedHeight(s(34))
             btn.setChecked(code == self.lang)
             btn.clicked.connect(lambda _=False, c=code: self._pick_lang(c))
             self.lang_btns.append(btn)
@@ -477,8 +477,8 @@ class SettingsWindow(QDialog):
         wrap = QWidget()
         wrap.setObjectName("workTimeBox")
         lay = QVBoxLayout(wrap)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setContentsMargins(s(0), s(0), s(0), s(0))
+        lay.setSpacing(s(6))
         self.work_labels = []
         self.m_am_s = self._time_edit(wt.get("morning", ["09:00", "12:00"])[0])
         self.m_am_e = self._time_edit(wt.get("morning", ["09:00", "12:00"])[1])
@@ -490,11 +490,11 @@ class SettingsWindow(QDialog):
 
     def _work_row(self, label, start, end):
         row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
+        row.setContentsMargins(s(0), s(0), s(0), s(0))
+        row.setSpacing(s(6))
         lab = QLabel(tr(label))
         lab.setObjectName("workLabel")
-        lab.setFixedWidth(32)
+        lab.setFixedWidth(s(32))
         self.work_labels.append((lab, label))
         sep = QLabel("-")
         sep.setObjectName("workSep")
@@ -508,16 +508,16 @@ class SettingsWindow(QDialog):
         edit = QTimeEdit(self._qtime(value))
         edit.setObjectName("workInput")
         edit.setDisplayFormat("HH:mm")
-        edit.setFixedSize(76, 32)
+        edit.setFixedSize(s(76), s(32))
         edit.setButtonSymbols(QTimeEdit.ButtonSymbols.NoButtons)
         return edit
 
     def _copyright(self):
         band = QWidget()
         band.setObjectName("copyrightBand")
-        band.setFixedHeight(60)
+        band.setFixedHeight(s(60))
         lay = QHBoxLayout(band)
-        lay.setContentsMargins(18, 0, 18, 0)
+        lay.setContentsMargins(s(18), s(0), s(18), s(0))
         text = QLabel(config.character.copyright or "Copyright © 2026 Christopher Hsu. All rights reserved.")
         text.setObjectName("copyright")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -530,40 +530,40 @@ class SettingsWindow(QDialog):
         page = QWidget()
         page.setObjectName("settingsBody")
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(28, 22, 28, 22)
-        lay.setSpacing(0)
+        lay.setContentsMargins(s(28), s(22), s(28), s(22))
+        lay.setSpacing(s(0))
 
         self.admin_title = QLabel(tr("音频生成"))
         self.admin_title.setObjectName("adminTitle")
         lay.addWidget(self.admin_title)
-        lay.addSpacing(8)
+        lay.addSpacing(s(8))
 
         self.admin_desc = QLabel(tr("生成的音频可试听，保存后写入本地附加语音库"))
         self.admin_desc.setObjectName("adminHint")
         self.admin_desc.setWordWrap(True)
         lay.addWidget(self.admin_desc)
-        lay.addSpacing(15)
+        lay.addSpacing(s(15))
 
         self.voice_text = QTextEdit()
         self.voice_text.setObjectName("voiceText")
         self.voice_text.setPlaceholderText(tr("输入要生成的播报内容"))
-        self.voice_text.setFixedHeight(122)
+        self.voice_text.setFixedHeight(s(122))
         lay.addWidget(self.voice_text)
-        lay.addSpacing(14)
+        lay.addSpacing(s(14))
 
         self.generate_btn = QPushButton(tr("生成"))
         self.generate_btn.setObjectName("primaryBtn")
-        self.generate_btn.setFixedHeight(36)
+        self.generate_btn.setFixedHeight(s(36))
         self.generate_btn.clicked.connect(self._generate_preview_voice)
         lay.addWidget(self.generate_btn)
-        lay.addSpacing(14)
+        lay.addSpacing(s(14))
 
         player_row = QHBoxLayout()
-        player_row.setContentsMargins(0, 0, 0, 0)
-        player_row.setSpacing(8)
+        player_row.setContentsMargins(s(0), s(0), s(0), s(0))
+        player_row.setSpacing(s(8))
         self.play_btn = QPushButton("▶")
         self.play_btn.setObjectName("secondaryBtn")
-        self.play_btn.setFixedSize(44, 32)
+        self.play_btn.setFixedSize(s(44), s(32))
         self.play_btn.setEnabled(False)
         self.play_btn.clicked.connect(self._toggle_preview)
         self.preview_slider = QSlider(Qt.Orientation.Horizontal)
@@ -572,7 +572,7 @@ class SettingsWindow(QDialog):
         self.preview_slider.sliderMoved.connect(self.player.setPosition)
         self.time_label = QLabel("00:00 / 00:00")
         self.time_label.setObjectName("timeLabel")
-        self.time_label.setFixedWidth(92)
+        self.time_label.setFixedWidth(s(92))
         player_row.addWidget(self.play_btn)
         player_row.addWidget(self.preview_slider, 1)
         player_row.addWidget(self.time_label)
@@ -583,17 +583,17 @@ class SettingsWindow(QDialog):
     def _footer(self):
         footer = QWidget()
         footer.setObjectName("settingsFooter")
-        footer.setFixedHeight(58)
+        footer.setFixedHeight(s(58))
         lay = QHBoxLayout(footer)
-        lay.setContentsMargins(18, 0, 18, 0)
-        lay.setSpacing(8)
+        lay.setContentsMargins(s(18), s(0), s(18), s(0))
+        lay.setSpacing(s(8))
         lay.addStretch(1)
         self.back_btn = QPushButton(tr("返回"))
         self.save_btn = QPushButton(tr("保存"))
         self.back_btn.setObjectName("secondaryBtn")
         self.save_btn.setObjectName("primaryBtn")
-        self.back_btn.setFixedSize(64, 32)
-        self.save_btn.setFixedSize(64, 32)
+        self.back_btn.setFixedSize(s(64), s(32))
+        self.save_btn.setFixedSize(s(64), s(32))
         lay.addWidget(self.back_btn)
         lay.addWidget(self.save_btn)
         return footer

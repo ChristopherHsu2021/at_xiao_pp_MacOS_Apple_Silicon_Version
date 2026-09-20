@@ -16,7 +16,7 @@ from app.core import alarm as alarm_mod, assets, config
 from app.core.i18n import tr
 from app.core.voice import say
 from app.ui.common import PeekCard, NoticeDialog
-from app.ui.screen_fit import fit_window
+from app.ui.screen_fit import fit_window, scale_qss, s
 from app.ui.context_menu import ActionPopupMenu
 
 
@@ -48,7 +48,7 @@ def _alarm_menu_icon(kind):
     return QIcon(pixmap)
 
 
-ALARM_QSS = """
+ALARM_QSS = scale_qss("""
 QWidget#alarmCard {
     background: #fffaf5;
     border: 1px solid rgba(255,255,255,0.60);
@@ -188,14 +188,14 @@ QCheckBox#dayCheck::indicator {
     background: transparent;
 }
 QCheckBox#dayCheck::indicator:checked { background: #f97510; border-color: #f97510; }
-"""
+""")
 
 
 class Switch(QPushButton):
     def __init__(self, on=True):
         super().__init__()
         self._on = bool(on)
-        self.setFixedSize(44, 24)
+        self.setFixedSize(s(44), s(24))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet("QPushButton{background:transparent;border:none;padding:0;margin:0;}")
 
@@ -235,20 +235,20 @@ class AlarmRow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 12, 8, 12)
-        lay.setSpacing(12)
+        lay.setContentsMargins(s(8), s(12), s(8), s(12))
+        lay.setSpacing(s(12))
 
         time = QLabel(f"{int(alarm['hour']):02d}:{int(alarm['minute']):02d}")
         time.setObjectName("alarmTime")
-        time.setFixedWidth(78)
+        time.setFixedWidth(s(78))
         time.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay.addWidget(time)
 
         info_w = QWidget()
         info_w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         info = QVBoxLayout(info_w)
-        info.setContentsMargins(0, 0, 0, 0)
-        info.setSpacing(2)
+        info.setContentsMargins(s(0), s(0), s(0), s(0))
+        info.setSpacing(s(2))
         rep = QLabel(self._repeat_text())
         rep.setObjectName("alarmRepeat")
         ring = QLabel(self._ring_text())
@@ -325,23 +325,23 @@ class AlarmWindow(QDialog):
 
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
+        root.setSpacing(s(0))
 
         self.card = PeekCard(self, scale=1.12)
         self.card.setObjectName("alarmCard")
         self.card.setStyleSheet(ALARM_QSS)
         self.card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         shadow = QGraphicsDropShadowEffect(self.card)
-        shadow.setBlurRadius(32)
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(s(32))
+        shadow.setOffset(s(0), s(8))
         shadow.setColor(QColor(180, 120, 50, 32))
         self.card.setGraphicsEffect(shadow)
         root.addWidget(self.card)
 
         card_lay = QVBoxLayout(self.card)
-        card_lay.setContentsMargins(0, 0, 0, 0)
-        card_lay.setSpacing(0)
+        card_lay.setContentsMargins(s(0), s(0), s(0), s(0))
+        card_lay.setSpacing(s(0))
         self.stack = QStackedWidget()
         card_lay.addWidget(self.stack)
         self._build_list_page()
@@ -350,9 +350,9 @@ class AlarmWindow(QDialog):
     def _bar(self, title, show_add=False):
         bar = QWidget()
         bar.setObjectName("windowBar")
-        bar.setFixedHeight(58)
+        bar.setFixedHeight(s(58))
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(18, 0, 18, 0)
+        lay.setContentsMargins(s(18), s(0), s(18), s(0))
         title_l = QLabel(title)
         title_l.setObjectName("windowTitle")
         if show_add:
@@ -364,12 +364,12 @@ class AlarmWindow(QDialog):
         if show_add:
             self._list_add_btn = QPushButton("+ " + tr("添加"))
             self._list_add_btn.setObjectName("primaryBtn")
-            self._list_add_btn.setFixedSize(72, 32)
+            self._list_add_btn.setFixedSize(s(72), s(32))
             self._list_add_btn.clicked.connect(self._show_add)
             lay.addWidget(self._list_add_btn)
             self._list_back_btn = QPushButton(tr("返回"))
             self._list_back_btn.setObjectName("secondaryBtn")
-            self._list_back_btn.setFixedSize(58, 32)
+            self._list_back_btn.setFixedSize(s(58), s(32))
             self._list_back_btn.clicked.connect(self.close)
             lay.addWidget(self._list_back_btn)
         bar.mousePressEvent = self._bar_press
@@ -381,8 +381,8 @@ class AlarmWindow(QDialog):
         page.setObjectName("alarmPage")
         page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         root = QVBoxLayout(page)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
+        root.setSpacing(s(0))
         root.addWidget(self._bar("⏰️ " + tr("闹钟"), True))
 
         self.scroll = QScrollArea()
@@ -394,8 +394,8 @@ class AlarmWindow(QDialog):
         self.list_w.setObjectName("alarmListWidget")
         self.list_w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.list_lay = QVBoxLayout(self.list_w)
-        self.list_lay.setContentsMargins(10, 8, 10, 12)
-        self.list_lay.setSpacing(0)
+        self.list_lay.setContentsMargins(s(10), s(8), s(10), s(12))
+        self.list_lay.setSpacing(s(0))
         self.scroll.setWidget(self.list_w)
         root.addWidget(self.scroll, 1)
         self.stack.addWidget(page)
@@ -406,45 +406,45 @@ class AlarmWindow(QDialog):
         page.setObjectName("alarmPage")
         page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         root = QVBoxLayout(page)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(s(0), s(0), s(0), s(0))
+        root.setSpacing(s(0))
         root.addWidget(self._bar(tr("添加闹钟"), False))
 
         body = QWidget()
         body.setObjectName("alarmBody")
         body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         body_l = QVBoxLayout(body)
-        body_l.setContentsMargins(18, 18, 18, 8)
-        body_l.setSpacing(0)
+        body_l.setContentsMargins(s(18), s(18), s(18), s(8))
+        body_l.setSpacing(s(0))
 
         time_row = QHBoxLayout()
-        time_row.setSpacing(8)
+        time_row.setSpacing(s(8))
         self.h_in = self._time_input("07", 23)
         self.m_in = self._time_input("00", 59)
         colon = QLabel(":")
         colon.setObjectName("timeColon")
         colon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        colon.setFixedWidth(16)
+        colon.setFixedWidth(s(16))
         time_row.addWidget(self.h_in)
         time_row.addWidget(colon)
         time_row.addWidget(self.m_in)
         time_row.addStretch(1)
         body_l.addLayout(time_row)
-        body_l.addSpacing(16)
+        body_l.addSpacing(s(16))
 
         body_l.addWidget(self._field_label("重复"))
-        body_l.addSpacing(6)
+        body_l.addSpacing(s(6))
         self.repeat_combo = QComboBox()
         self.repeat_combo.setObjectName("fieldInput")
         for value in (tr("仅一次"), tr("每天"), tr("工作日（周一至周五）"), tr("自定义")):
             self.repeat_combo.addItem(value)
         self.repeat_combo.setCurrentIndex(1)
-        self.repeat_combo.setFixedHeight(46)
+        self.repeat_combo.setFixedHeight(s(46))
         self.repeat_combo.currentIndexChanged.connect(self._on_repeat)
         body_l.addWidget(self.repeat_combo)
 
         self.repeat_extra = QStackedWidget()
-        self.repeat_extra.setFixedHeight(46)
+        self.repeat_extra.setFixedHeight(s(46))
 
         empty_once_space = QWidget()
         empty_once_space.setObjectName("alarmBody")
@@ -452,12 +452,12 @@ class AlarmWindow(QDialog):
         once_page = QWidget()
         once_page.setObjectName("alarmBody")
         once_l = QVBoxLayout(once_page)
-        once_l.setContentsMargins(0, 0, 0, 0)
+        once_l.setContentsMargins(s(0), s(0), s(0), s(0))
         self.once_date = QDateEdit(QDate.currentDate())
         self.once_date.setObjectName("fieldInput")
         self.once_date.setDisplayFormat("yyyy/MM/dd")
         self.once_date.setCalendarPopup(True)
-        self.once_date.setFixedHeight(46)
+        self.once_date.setFixedHeight(s(46))
         once_l.addWidget(self.once_date)
 
         empty_weekday_space = QWidget()
@@ -467,8 +467,8 @@ class AlarmWindow(QDialog):
         self.days_w.setObjectName("alarmDays")
         self.days_w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         days_l = QHBoxLayout(self.days_w)
-        days_l.setContentsMargins(0, 0, 0, 0)
-        days_l.setSpacing(6)
+        days_l.setContentsMargins(s(0), s(0), s(0), s(0))
+        days_l.setSpacing(s(6))
         self.day_btns = []
         for label in ["一", "二", "三", "四", "五", "六", "日"]:
             cb = QCheckBox(label)
@@ -479,39 +479,39 @@ class AlarmWindow(QDialog):
         self.repeat_extra.addWidget(once_page)
         self.repeat_extra.addWidget(empty_weekday_space)
         self.repeat_extra.addWidget(self.days_w)
-        body_l.addSpacing(8)
+        body_l.addSpacing(s(8))
         body_l.addWidget(self.repeat_extra)
-        body_l.addSpacing(16)
+        body_l.addSpacing(s(16))
 
         body_l.addWidget(self._field_label("铃声"))
-        body_l.addSpacing(6)
+        body_l.addSpacing(s(6))
         self.ring_search = QLineEdit()
         self.ring_search.setObjectName("fieldInput")
         self.ring_search.setPlaceholderText(tr("搜索歌曲..."))
-        self.ring_search.setFixedHeight(46)
+        self.ring_search.setFixedHeight(s(46))
         self.ring_search.textChanged.connect(self._filter_ring)
         body_l.addWidget(self.ring_search)
-        body_l.addSpacing(10)
+        body_l.addSpacing(s(10))
 
         self.ring_list = QListWidget()
         self.ring_list.setObjectName("ringList")
-        self.ring_list.setFixedHeight(108)
+        self.ring_list.setFixedHeight(s(108))
         self.ring_list.itemClicked.connect(self._pick_ring)
         body_l.addWidget(self.ring_list)
-        body_l.addSpacing(16)
+        body_l.addSpacing(s(16))
 
         body_l.addWidget(self._field_label("自定义语音播报（选填）"))
-        body_l.addSpacing(6)
+        body_l.addSpacing(s(6))
         self.custom_text = QLineEdit()
         self.custom_text.setObjectName("fieldInput")
         self.custom_text.setPlaceholderText(tr('例如："该起床啦"'))
-        self.custom_text.setFixedHeight(46)
+        self.custom_text.setFixedHeight(s(46))
         body_l.addWidget(self.custom_text)
         body_l.addStretch(1)
-        body_l.addSpacing(12)
+        body_l.addSpacing(s(12))
 
         footer = QHBoxLayout()
-        footer.setSpacing(8)
+        footer.setSpacing(s(8))
         footer.addStretch(1)
         self.delete_b = QPushButton(tr("删除"))
         self.cancel_b = QPushButton(tr("取消"))
@@ -519,9 +519,9 @@ class AlarmWindow(QDialog):
         self.delete_b.setObjectName("secondaryBtn")
         self.cancel_b.setObjectName("secondaryBtn")
         self.save_b.setObjectName("primaryBtn")
-        self.delete_b.setFixedSize(64, 34)
-        self.cancel_b.setFixedSize(64, 34)
-        self.save_b.setFixedSize(64, 34)
+        self.delete_b.setFixedSize(s(64), s(34))
+        self.cancel_b.setFixedSize(s(64), s(34))
+        self.save_b.setFixedSize(s(64), s(34))
         self.delete_b.clicked.connect(self._delete_editing)
         self.cancel_b.clicked.connect(self._show_list)
         self.save_b.clicked.connect(self._save)
@@ -566,7 +566,7 @@ class AlarmWindow(QDialog):
     def _time_input(self, value, maximum):
         edit = QLineEdit(value)
         edit.setObjectName("timeNum")
-        edit.setFixedSize(68, 58)
+        edit.setFixedSize(s(68), s(58))
         edit.setMaxLength(2)
         edit.setValidator(QIntValidator(0, maximum, edit))
         edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -617,7 +617,7 @@ class AlarmWindow(QDialog):
         alarms = alarm_mod.load()
         if not alarms:
             empty = QLabel(tr("暂无闹钟，点『添加』设置捏～"))
-            empty.setStyleSheet("color:#a08e7a;font-size:13px;padding:20px;")
+            empty.setStyleSheet(scale_qss("color:#a08e7a;font-size:13px;padding:20px;"))
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.list_lay.addWidget(empty)
         for alarm in alarms:

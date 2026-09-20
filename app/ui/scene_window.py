@@ -17,6 +17,7 @@ from app.core.speech import pick_line
 from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.common import GlassWindow
+from app.ui.screen_fit import scale_qss, s
 
 
 def _random_point_around(center_x, center_y, radius_min, radius_max, max_x, max_y, width, height):
@@ -129,21 +130,21 @@ class SceneWindow(GlassWindow):
 
     def _build(self):
         root = QVBoxLayout()
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(s(16), s(16), s(16), s(16))
+        root.setSpacing(s(12))
         self.body_layout.addLayout(root)
 
         self.canvas = QWidget()
         self.canvas.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.canvas.setMinimumHeight(240)
-        self.canvas.setStyleSheet(
+        self.canvas.setMinimumHeight(s(240))
+        self.canvas.setStyleSheet(scale_qss(
             "background: qlineargradient(x1:0,y1:0,x2:1,y2:1,#fef3e2,#f9d9aa);"
             "border-radius:16px;"
-        )
+        ))
         root.addWidget(self.canvas, 1)
 
         self.hint = QLabel(tr("把『人物』拖到『物品』上，凑到一起就能触发捏～"))
-        self.hint.setStyleSheet("font-size:12px;color:#a08e7a;text-align:center;")
+        self.hint.setStyleSheet(scale_qss("font-size:12px;color:#a08e7a;text-align:center;"))
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self.hint)
 
