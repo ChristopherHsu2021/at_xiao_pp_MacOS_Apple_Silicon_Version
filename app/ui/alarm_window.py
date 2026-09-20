@@ -242,6 +242,9 @@ class AlarmRow(QWidget):
         self.on_delete = on_delete
         self.setObjectName("alarmRow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # 行高固定为自身 sizeHint，不接受布局额外空间（同 TaskRow：避免行被拉高、
+        # 行距随窗口高度漂移）
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(s(8), s(12), s(8), s(12))

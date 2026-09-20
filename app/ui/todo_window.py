@@ -27,7 +27,7 @@ from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.common import (
     PeekCard, NoticeDialog, promote_popup_topmost,
-    EditContextMenu, CTX_MENU_TEXT_QSS,
+    EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui,
 )
 from app.ui.screen_fit import fit_window, scale_qss, s
 from app.ui.context_menu import ActionPopupMenu, ACTION_POPUP_QSS
@@ -702,6 +702,12 @@ class TaskRow(QWidget):
         「提醒时间：年-月-日 时:分」。
         """
         super().__init__()
+        # ★ 行高永久固定为自身 sizeHint：绝不接受布局分来的额外空间。
+        #   否则一旦父布局比内容高（例如窗口高度被算大、或平台字体度量变了），Qt 会把
+        #   多余空间塞进「唯一可伸展」的行里 → 行被拉高、内容垂直居中 → 表现为
+        #   「头部与首项之间、项与项之间的间距忽大忽小」（用户实测 macOS 上交互后
+        #   任务行间距翻倍）。任务清单页与桌面挂件 TodoDock 共用本行控件。
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.glass_tag = bool(glass_tag)
         self.task = task
         self.on_toggle = on_toggle
@@ -1914,7 +1920,9 @@ class StickyNoteWindow(QWidget):
             # 右键落在标题 → 编辑动作作用于标题输入框；落在内容（含 QTextEdit 的
             # viewport）→ 作用于富文本编辑器；落在卡片空白 → 默认内容编辑器。
             target = self.title if obj is self.title else self.editor.editor
-            self._show_sticky_menu(event, target)
+            # guard_ui：事件过滤器里构造弹窗，异常必须就地拦住（PyQt6 会把逃逸到
+            # 虚函数外的 Python 异常升级成 qFatal → 整个 App abort，用户实测右键闪退）
+            guard_ui("便签右键菜单", self._show_sticky_menu, event, target)
             return True
         return super().eventFilter(obj, event)
 

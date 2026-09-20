@@ -43,10 +43,11 @@ IS_MAC = sys.platform == "darwin"
 # ---------------- NSWindowLevel ----------------
 LEVEL_NORMAL = 0
 LEVEL_FLOATING = 3
-# 桌面层（kCGDesktopIconWindowLevel = kCGDesktopWindowLevel + 1，即 INT32_MIN + 26）：
-# 位于壁纸之上、桌面图标同一层，**在所有 App 普通窗口之下**。桌面挂件用它实现
-# 「与桌面融为一体、不遮挡其它应用界面」——别的软件一出现就自然盖住它。
-# 不用更低的 kCGDesktopWindowLevel（壁纸那一层）是为了避免被壁纸本身盖住而看不见。
+# 桌面层（kCGDesktopIconWindowLevel = kCGDesktopWindowLevel + 1，即 INT32_MIN + 26）。
+# ⚠️ 实测不可用（2026-09-21，TodoDock 上验证过，勿再启用）：
+#   窗口一旦降到这一层，内容会被系统合成成「半透明发虚」的样子，并且被 Finder 的
+#   桌面窗口吃掉全部鼠标事件（hitTest/acceptsFirstMouse 都收不到）→ 挂件完全无法点击。
+#   常量保留仅为记录结论、供将来排查；要「不遮挡其它应用」请用 LEVEL_NORMAL。
 LEVEL_DESKTOP = -2147483622
 
 # ---------------- NSWindowCollectionBehavior ----------------
@@ -76,6 +77,7 @@ DESKTOP_WIDGET_BEHAVIOR = (
 # hitTest: 需要的 NSPoint（与 CGPoint 同构）
 _NSPoint = None
 _HIT_TEST_IMP = []          # 保活 IMP，防止被 GC 后崩溃
+_ACCEPTS_FIRST_MOUSE_IMP = []
 _ROUTE_BY_VIEW = {}         # NSView 指针 -> (widget, should_capture 回调)
 _CLASS_SEQ = [0]
 _LIB = None
@@ -399,6 +401,20 @@ def _hit_test_imp():
     return imp
 
 
+def _accepts_first_mouse_imp():
+    """构造并缓存 ``acceptsFirstMouse:`` 的 C 函数指针（固定返回 YES）。"""
+    if _ACCEPTS_FIRST_MOUSE_IMP:
+        return _ACCEPTS_FIRST_MOUSE_IMP[0]
+
+    def _impl(self_ptr, _sel_ptr, _event_ptr):
+        return 1                        # YES
+
+    sig = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+    imp = sig(_impl)
+    _ACCEPTS_FIRST_MOUSE_IMP.append(imp)   # 保活
+    return imp
+
+
 def install_hit_test_router(widget, should_capture, tag="hit-test"):
     """给顶层窗口挂上「空白穿透、交互区可点」的 hitTest: 路由。
 
@@ -410,6 +426,11 @@ def install_hit_test_router(widget, should_capture, tag="hit-test"):
     （继承自 NSView），窗口绘制与事件分发全部由它自己的方法完成；若把类换成
     「NSView 的子类」，QNSView 的实现整批丢失 —— 窗口既不显示、也收不到任何事件。
     只覆盖 hitTest: 时，QNSView 其余行为原样保留。
+
+    同时覆盖 ``acceptsFirstMouse:`` 返回 YES（2026-09-21 补）：
+    AppKit 默认对「非 key 窗口」不投递首次点击（第一次点击只用来激活本 App），
+    桌面挂件要「单击即生效」就必须放开。空白区在 hitTest: 已返回 nil、
+    根本走不到这里，所以无条件 YES 不会让挂件抢走桌面的点击。
 
     返回 True 表示注入成功（同一 view 重复注入是幂等的）。
     """
@@ -440,6 +461,14 @@ def install_hit_test_router(widget, should_capture, tag="hit-test"):
             ctypes.cast(imp, ctypes.c_void_p), b"@@:{CGPoint=dd}"
         ):
             raise RuntimeError("class_addMethod hitTest: 失败")
+        # 非 key 窗口也要「单击即响应」（BOOL 在 x86_64 上是 char → 编码用 c）
+        imp_first = _accepts_first_mouse_imp()
+        if not lib.class_addMethod(
+            ctypes.c_void_p(new_cls), ctypes.c_void_p(_sel("acceptsFirstMouse:")),
+            ctypes.cast(imp_first, ctypes.c_void_p), b"c@:@"
+        ):
+            mac_log(f"{tag}: class_addMethod acceptsFirstMouse: 失败（不影响穿透）",
+                    tag="mac-error")
         lib.objc_registerClassPair(ctypes.c_void_p(new_cls))
         lib.object_setClass(ctypes.c_void_p(view), ctypes.c_void_p(new_cls))
 

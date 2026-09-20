@@ -46,7 +46,7 @@ import sys
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QScrollArea, QApplication,
 )
-from PyQt6.QtCore import Qt, QPoint, QRect
+from PyQt6.QtCore import Qt, QPoint, QRect, QTimer
 
 from app.core import todo
 from app.core.i18n import tr
@@ -141,16 +141,21 @@ class TodoDock(QWidget):
     def _apply_mac_outer_style(self, verbose=True):
         """macOS 专属显示逻辑：不受台前调度影响（见 app/ui/mac_window.py 顶部说明）。
 
-        2026-09-21 意见：「这个页面应该像与桌面融为一体的感觉，不遮挡住其他应用或界面的
-        显示」。原实现在 NSFloatingWindowLevel（浮层）→ 挂件永远压在所有 App 窗口之上，
-        文字会盖住其它软件的界面。现改为挂在**桌面层**（level="desktop"）：仍然常驻桌面、
-        所有空间可见、不被台前调度收走，但层级落到普通窗口之下 —— 其它 App 窗口一出现就
-        自然盖住它，符合「桌面挂件」的语义。
+        层级取舍（2026-09-21 实测定稿，别再改回去）：
+        - NSFloatingWindowLevel（floating=True）：挂件永远压在所有 App 窗口之上，
+          文字会盖住其它软件界面（用户意见「不遮挡住其他应用或界面的显示」）。
+        - 桌面层（level="desktop" / kCGDesktopIconWindowLevel）：试过，**不可用** ——
+          实测挂件内容被系统画成半透明发虚，而且被 Finder 的桌面窗口吃掉全部鼠标事件，
+          变成「完全无法点击」。
+        - 现用 NSNormalWindowLevel（floating=False）：层级与普通窗口一致，
+          其它 App 被激活时其窗口自然升到挂件之上（不再遮挡），桌面/本程序前台时
+          挂件可见可点；配合 collectionBehavior 仍常驻所有空间、不被台前调度收走。
+          再叠加 acceptsFirstMouse: → 非激活状态下也能单击即生效。
         """
         if not IS_MAC:
             return False
         return apply_desktop_widget_style(
-            self, floating=True, level="desktop", tag="TodoDock", verbose=verbose
+            self, floating=False, tag="TodoDock", verbose=verbose
         )
 
     def _on_app_state_changed(self, _state):
@@ -362,6 +367,9 @@ class TodoDock(QWidget):
         super().showEvent(e)
         self._place_top_left()
         self._fit_height()
+        # 首次显示时样式表字体可能还没落到控件上（sizeHint 偏大/偏小 → 挂件高度不准），
+        # 等一轮事件循环后再按真实度量收一次高度。
+        QTimer.singleShot(0, self._fit_height)
         # Qt 可能重建原生窗口（窗口标志变化等），每次都重申挂件语义与穿透路由
         # （两者都幂等：桌面挂件语义是回写属性，hitTest 路由同一 view 直接返回）
         if IS_MAC:

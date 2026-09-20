@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QStyledItemDelegate, QStyleOptionViewItem, QStyle, QGraphicsDropShadowEffect,
 )
 
-from app.ui.common import promote_popup_topmost, EditContextMenu
+from app.ui.common import promote_popup_topmost, EditContextMenu, guard_ui
 from app.core.i18n import tr
 from app.ui.screen_fit import scale_qss, s
 
@@ -758,7 +758,11 @@ class RichEditor(QWidget):
                 and et == QEvent.Type.ContextMenu
                 and isinstance(obj, QWidget) and obj is self.editor.viewport()):
             event.accept()
-            self._edit_menu = EditContextMenu(self, self.editor).show_at(event.globalPos())
+            # guard_ui：在事件过滤器里构造弹窗；一旦抛异常 PyQt6 会 qFatal 整个 App
+            # （用户实测过右键内容框闪退）。套一层后最坏只是不弹菜单。
+            self._edit_menu = guard_ui(
+                "任务内容框右键菜单",
+                lambda: EditContextMenu(self, self.editor).show_at(event.globalPos()))
             return True
 
         # 3) 紧凑模式工具栏按钮 hover：图标由灰转橙（与「全选」按钮 hover 配色一致）

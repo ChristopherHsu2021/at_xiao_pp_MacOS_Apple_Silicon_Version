@@ -12,6 +12,7 @@ from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 
 from app.core import assets
 import sys
+import traceback
 
 from app.core.i18n import tr
 from app.ui.style import GLASS_STYLE, COLOR
@@ -494,6 +495,32 @@ EDIT_MENU_SHORTCUTS = {
 }
 
 
+def guard_ui(label, fn, *args, **kwargs):
+    """在 Qt 虚函数（事件过滤器 / 虚函数重写）内部安全执行 UI 回调。
+
+    ★ 为什么必须有：PyQt6 对「从虚函数里逃逸的 Python 异常」的处理是直接
+    ``qFatal()`` → 整个 App ``abort()``。用户实测过一次整程序闪退，崩溃栈为
+    ``sipQWidget::eventFilter`` → ``pyqt6_err_print`` → ``QMessageLogger::fatal``
+    → ``abort``，而根因只是一个 ``UnboundLocalError``（见 EditContextMenu._row 的注释）。
+    对桌面软件来说，宁可不弹这个菜单，也绝不能整程序退出。
+    异常会写进 macOS 兼容日志（``mac_window.mac_log``，Windows 端仅打印到 stderr），便于追溯。
+
+    返回 fn 的返回值；异常时返回 None。
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        detail = traceback.format_exc()
+        print(f"[ui-guard] {label} 异常（已拦截，避免 qFatal 崩溃）：{exc!r}\n{detail}",
+              file=sys.stderr)
+        try:
+            from app.ui.mac_window import mac_log
+            mac_log(f"{label} 异常（已拦截）：{exc!r}\n{detail}", tag="ui-guard")
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+
 class EditContextMenu(QWidget):
     """自绘文本编辑右键菜单（顶层 Qt.Popup，避免被窗口边界裁切）。
 
@@ -555,7 +582,16 @@ class EditContextMenu(QWidget):
 
     # ---------- 行 / 分隔线 ----------
     def _row(self, text, shortcut, cb):
-        """一行菜单项：左侧文案，右侧灰色快捷键提示（QPushButton 承载 hover 底色）。"""
+        """一行菜单项：左侧文案，右侧灰色快捷键提示（QPushButton 承载 hover 底色）。
+
+        ★ 命名红线：本函数用了全局缩放辅助 ``s()``，因此**绝不允许**出现名为 ``s`` 的
+        局部变量。Python 的作用域是函数级的，一旦某处写了 ``s = ...``，整个函数里的 ``s``
+        都变成局部名；在第 561 行这类「赋值之前」的调用点就会抛
+        ``UnboundLocalError``。而本函数是在 QWidget.eventFilter 的调用链里跑的，
+        PyQt6 对虚函数里逃逸的 Python 异常直接 ``qFatal()`` → **整个 App abort**
+        （用户实测：右键便签/任务内容框 → 闪退，栈为 sipQWidget::eventFilter →
+        pyqt6_err_print → QMessageLogger::fatal）。快捷键标签一律命名 ``sc_lbl``。
+        """
         b = QPushButton()
         b.setObjectName("ctxMenuItem")
         b.setFixedHeight(s(34))
@@ -570,10 +606,10 @@ class EditContextMenu(QWidget):
         rl.addWidget(t)
         rl.addStretch(1)
         if shortcut:
-            s = QLabel(shortcut)
-            s.setStyleSheet(CTX_MENU_SHORTCUT_QSS)
-            s.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            rl.addWidget(s)
+            sc_lbl = QLabel(shortcut)
+            sc_lbl.setStyleSheet(CTX_MENU_SHORTCUT_QSS)
+            sc_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            rl.addWidget(sc_lbl)
         b.clicked.connect(lambda _checked=False, c=cb: self._trigger(c))
         return b
 
