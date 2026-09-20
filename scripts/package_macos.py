@@ -564,6 +564,20 @@ def _write_first_open_readme(path: Path, app_name: str,
         xattr -dr com.apple.quarantine /Applications/{app_name}
     （若文件不在“下载”目录，把路径换成实际位置；路径含空格要加引号）
 
+    常见报错 1：xattr: [Errno 13] Permission denied
+        → 终端没有“下载”文件夹的访问权限（macOS 隐私保护）。三选一：
+          a) 加 sudo 再试：
+             sudo xattr -dr com.apple.quarantine ~/Downloads/{dmg_name}
+          b) 先把文件移出受保护目录（主目录根下即可），再去隔离：
+             mv ~/Downloads/{dmg_name} ~/{dmg_name}
+             xattr -dr com.apple.quarantine ~/{dmg_name}
+             open ~/{dmg_name}
+          c) 一劳永逸：系统设置 → 隐私与安全性 → 完全磁盘访问权限 → 打开「终端」；
+             或在「文件和文件夹 → 终端」里勾上「下载」。之后原命令即可用。
+    常见报错 2：/Applications 下的 App 去隔离时也被拒
+        → 加 sudo：sudo xattr -dr com.apple.quarantine /Applications/{app_name}
+          （若拖到的是用户级 ~/Applications，则不需要 sudo）
+
 三、方式二：不用终端
     1) 右键点击 AT小PP-macos.dmg → 选「打开」→ 弹窗里再点一次「打开」。
     2) 若弹窗只有「完成 / 移到废纸篓」没有「打开」：
