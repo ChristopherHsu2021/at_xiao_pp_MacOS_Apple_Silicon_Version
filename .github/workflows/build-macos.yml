@@ -2,29 +2,38 @@ name: Build macOS .dmg
 
 # 触发方式：
 #   1. 手动：仓库 Actions → Build macOS .dmg → Run workflow
-  #   2. 推送 macOS-intel-build / main 或打 v* tag 自动触发
+#   2. 推送 main（或 macOS-intel-build）及打 v* tag 自动触发
 on:
   workflow_dispatch:
   push:
-    branches: ["macOS-intel-build", "main"]
+    branches: ["main", "macOS-intel-build"]
     tags: ["v*"]
 
 jobs:
   build-macos:
-    # macos-13 (Intel) 已于 2025-12-04 退役，钉住它的任务会永远排队。
-    # 改用 macos-15 (Apple Silicon) 作为运行机，但**全程用 arch -x86_64 包裹构建**，
-    # 让 Python 进程以 x86_64 身份运行（走 Rosetta 2），从而产出 x86_64 包：
-    #   - Intel Mac 原生运行
-    #   - Apple Silicon Mac 经 Rosetta 2 运行
-    # 单个 .dmg 即可覆盖几乎所有 Mac，系统兼容性最强。
-    # 注意：actions/setup-python 的 architecture: x64 在 macOS 上是空操作（仍装 arm64 Python），
-    # 因此必须在构建命令外再包一层 arch -x86_64，否则会产出 arm64 包（Intel 机报 bad CPU type）。
+    # ------------------------------------------------------------------
+    # 单一 workflow 覆盖两条发行线，架构按「仓库名」自动判定：
+    #   - 仓库名含 Apple_Silicon（at_xiao_pp_MacOS_Apple_Silicon_Version）
+    #     → arm64 纯血原生：macos-15 runner 本身就是 Apple Silicon，
+    #       setup-python 装的也是原生 arm64 Python，**不加 arch -x86_64 包裹**，
+    #       产物 M 系列直接原生运行，无 Rosetta 2 翻译层（启动更快、排障不用穿翻译层）。
+    #       注意：arm64 包在 Intel Mac 上会报 "bad CPU type"，该仓库只面向 Apple Silicon。
+    #   - 其余仓库（Intel 兼容线）→ x86_64：全程 arch -x86_64 包裹（走 Rosetta 2），
+    #       单包覆盖 Intel 原生 + M 系列经 Rosetta 2 运行。
+    # ------------------------------------------------------------------
     runs-on: macos-15
+    env:
+      ATPP_TARGET_ARCH: ${{ contains(github.repository, 'Apple_Silicon') && 'arm64' || 'x86_64' }}
+      # x86_64 线需要 Rosetta 2 才能在 arm64 机器上进行交叉构建
+      USE_ROSETTA: ${{ contains(github.repository, 'Apple_Silicon') && '0' || '1' }}
+      ARTIFACT_SUFFIX: ${{ contains(github.repository, 'Apple_Silicon') && 'arm64' || 'intel' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rosetta 2 (x86_64 交叉编译必需)
+      - name: Install Rosetta 2 (仅 x86_64 交叉构建需要)
+        if: env.USE_ROSETTA == '1'
         run: sudo softwareupdate --install-rosetta --agree-to-license || true
 
       - name: Set up Python 3.13
@@ -32,20 +41,23 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Build x86_64 .dmg (venv+依赖+PyInstaller 全程 arch -x86_64)
-        env:
-          ATPP_TARGET_ARCH: x86_64
+      - name: Build .dmg
         run: |
-          arch -x86_64 bash -c '
-            set -e
-            python -m pip install --upgrade pip
-            pip install -r requirements-macos.txt
-            python scripts/package_macos.py --clean
-          '
+          set -e
+          # arm64 线：直接跑（原生）；x86_64 线：整条链路用 arch -x86_64 包裹（Rosetta 2）
+          if [ "$USE_ROSETTA" = "1" ]; then
+            ARCH_PREFIX="arch -x86_64"
+          else
+            ARCH_PREFIX=""
+          fi
+          echo "=== 目标架构: $ATPP_TARGET_ARCH（rosetta=$USE_ROSETTA）==="
+          $ARCH_PREFIX python -m pip install --upgrade pip
+          $ARCH_PREFIX pip install -r requirements-macos.txt
+          $ARCH_PREFIX python scripts/package_macos.py --clean
 
-      - name: Verify architecture (必须为 x86_64)
+      - name: Verify architecture
         run: |
-          echo "=== 应用二进制架构（应为 x86_64）==="
+          echo "=== 期望架构: $ATPP_TARGET_ARCH ==="
           lipo -info "dist/AT小PP.app/Contents/MacOS/AT小PP" || true
           echo "=== dmg 产物 ==="
           ls -lh release/AT小PP-macos.dmg
@@ -53,6 +65,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AT小PP-macos
+          name: AT小PP-macos-${{ env.ARTIFACT_SUFFIX }}
           path: release/AT小PP-macos.dmg
           if-no-files-found: error
