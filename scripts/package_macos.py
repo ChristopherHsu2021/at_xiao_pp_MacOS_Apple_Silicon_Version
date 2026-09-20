@@ -31,6 +31,7 @@ import subprocess
 import struct
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -537,6 +538,48 @@ def build_app() -> Path:
     return app
 
 
+def _detach_stale(volname: str) -> None:
+    """卸载可能残留的同名挂载点（hdiutil "Resource busy" 的常见来源）。
+
+    CI 上偶发：上一轮（或系统其它进程）遗留的 diskimages-helper 仍持有镜像，
+    导致本次 hdiutil create 直接失败。这里只针对**本次卷名**做 force detach，
+    不碰系统其它镜像；失败一律忽略（可能本来就没挂载）。
+    """
+    for target in (f"/Volumes/{volname}",):
+        try:
+            subprocess.run(["hdiutil", "detach", target, "-force"],
+                           capture_output=True, timeout=60)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _hdiutil_create(dmg: Path, stage: Path, attempts: int = 3) -> None:
+    """hdiutil create + 失败重试（最多 attempts 次）。
+
+    背景：2026-09-20 CI run 35493583652 在**代码零改动**的情况下报
+    ``hdiutil: create failed - Resource busy``，重跑即可成功 —— 属于 runner 端
+    diskimages 子系统的偶发占用，不是包本身的问题。这里在每次失败后
+    detach 残留挂载并递增等待后重试，避免"包没问题却因环境抖动失败"。
+    """
+    last: BaseException | None = None
+    for i in range(1, attempts + 1):
+        try:
+            _run([
+                "hdiutil", "create",
+                "-volname", "AT小PP",
+                "-srcfolder", str(stage),
+                "-ov", "-format", "UDZO",
+                str(dmg),
+            ])
+            return
+        except subprocess.CalledProcessError as exc:
+            last = exc
+            print(f"[hdiutil] 第 {i}/{attempts} 次失败（{exc}）→ 清理残留挂载后重试")
+            _detach_stale("AT小PP")
+            time.sleep(5 * i)
+    raise RuntimeError(f"hdiutil create 连续 {attempts} 次失败：{last}")
+
+
 def build_dmg(app_dir: Path) -> Path:
     """把真正的 AT小PP.app 直接打进 .dmg（拖进 /Applications 即用，无安装向导）。"""
     RELEASE.mkdir(parents=True, exist_ok=True)
@@ -566,13 +609,7 @@ def build_dmg(app_dir: Path) -> Path:
     dmg = RELEASE / "AT小PP-macos.dmg"
     if dmg.exists():
         dmg.unlink()
-    _run([
-        "hdiutil", "create",
-        "-volname", "AT小PP",
-        "-srcfolder", str(stage),
-        "-ov", "-format", "UDZO",
-        str(dmg),
-    ])
+    _hdiutil_create(dmg, stage)
     # 对 .dmg 也做自签名，进一步降低挂载时的拦截
     _codesign(dmg)
     print(f"已生成安装包：{dmg}")
