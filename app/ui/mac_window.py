@@ -301,6 +301,56 @@ def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verb
 
 
 # ---------------------------------------------------------------------------
+# 3) 无边框窗口的「用户可缩放」：给 NSWindow 追加 NSResizableWindowMask
+# ---------------------------------------------------------------------------
+# Qt 的 FramelessWindowHint 在 macOS 下会把 NSWindow 的 styleMask 设为
+# NSWindowStyleMaskBorderless(0) —— 没有标题栏/边框，也就没有原生缩放握把，
+# 用户无法从边缘拖拽改变窗口大小。绝大多数「玻璃卡片」工具窗口都因此只能固定大小。
+# 解决：给 styleMask 追加 NSResizableWindowMask（1<<3），macOS 就会在边缘提供
+# 缩放光标与拖拽缩放（即使视觉上无边框）。Qt 自己在 setMinimumSize/setMaximumSize
+# 时已对窗口几何做最小/最大钳制，原生缩放会被它自动夹紧，无需再同步 content size。
+# 该调用幂等、仅 darwin 生效；失败只记日志不影响主流程。
+NS_WINDOW_STYLE_MASK_RESIZABLE = 1 << 3
+
+
+def make_resizable(widget, tag="resizable"):
+    """macOS：让无边框（FramelessWindowHint）窗口可由用户从边缘自由缩放。
+
+    适用对象：所有「玻璃卡片」工具窗口（待办/便签/设置/播放器/闹钟/计时/场景/
+    状态面板等）。**不适用**：桌宠与桌面 TodoDock（用户明确要求固定不可缩放）。
+    其它平台（Qt 已有 ResizeGrip 自绘握把的窗口）原样返回，不影响现有逻辑。
+
+    仅追加 styleMask 的 resizable 位；不改动层级、不改动 collectionBehavior、
+    不改动最小/最大尺寸（由调用方的 setMinimumSize 决定）。
+    """
+    if not IS_MAC:
+        return False
+    try:
+        view = int(widget.winId())
+        if not view:
+            return False
+        win = _send_ptr(view, "window")
+        if not win:
+            _fail_log(tag, f"取不到 NSWindow（view={view}）")
+            return False
+        win = int(win)
+        cur = _send_uint(win, "styleMask")
+        if cur & NS_WINDOW_STYLE_MASK_RESIZABLE:
+            return True
+        _send_void_uint(win, "setStyleMask:", cur | NS_WINDOW_STYLE_MASK_RESIZABLE)
+        after = _send_uint(win, "styleMask")
+        if after & NS_WINDOW_STYLE_MASK_RESIZABLE:
+            mac_log(f"{tag}: NSWindow={win} styleMask=0x{after:x} 已追加 resizable（可边缘缩放）",
+                    tag="mac")
+            return True
+        _fail_log(tag, f"styleMask 追加 resizable 未生效（before=0x{cur:x} after=0x{after:x}）")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        mac_log(f"{tag}: make_resizable 异常 {exc!r}", tag="mac-error")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # 2) 选择性点击穿透：覆盖 content NSView 的 hitTest:
 # ---------------------------------------------------------------------------
 def _hit_test_imp():

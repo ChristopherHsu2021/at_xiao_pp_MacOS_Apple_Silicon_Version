@@ -15,7 +15,7 @@ import sys
 
 from app.core.i18n import tr
 from app.ui.style import GLASS_STYLE, COLOR
-from app.ui.mac_window import apply_stage_exempt
+from app.ui.mac_window import apply_stage_exempt, make_resizable
 
 # SetWindowPos 标志：NOSIZE(0x1) | NOMOVE(0x2) | NOACTIVATE(0x10) | SHOWWINDOW(0x40)
 _SWP_BASE = 0x0001 | 0x0002 | 0x0010 | 0x0040
@@ -263,6 +263,9 @@ class GlassWindow(QDialog):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.resize(width, height)
+        # macOS：无边框窗口追加 NSResizableWindowMask，可由用户从边缘自由缩放
+        # （最小尺寸按窗口默认大小的下限取，保证内容不溢出）；Windows 端本调用无效
+        self.setMinimumSize(max(360, int(width * 0.7)), max(320, int(height * 0.7)))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -318,6 +321,9 @@ class GlassWindow(QDialog):
         # 现有的置顶 / 让路（keep_on_top / release_topmost）语义保持不变。
         super().showEvent(e)
         apply_stage_exempt(self, tag=type(self).__name__)
+        # macOS：无边框窗口追加 NSResizableWindowMask，可由用户从边缘自由缩放
+        # （Windows 端该调用无效，沿用既有 ResizeGrip 自绘握把）
+        make_resizable(self, tag=type(self).__name__)
 
     def set_title(self, title: str):
         self.title_label.setText(title)

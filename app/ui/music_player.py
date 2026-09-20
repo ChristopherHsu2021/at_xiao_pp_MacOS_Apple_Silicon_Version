@@ -52,7 +52,7 @@ if IS_MAC:
 from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.context_menu import MENU_QSS
-from app.ui.mac_window import apply_stage_exempt
+from app.ui.mac_window import apply_stage_exempt, make_resizable
 
 
 PLAYER_QSS = ("""
@@ -2130,7 +2130,11 @@ class PlayerWindow(QDialog):
         # 圆角外的像素由遮罩排除、不予绘制，视觉上仍是「圆角卡片浮在桌面」。
         # 只影响「窗口如何合成到屏幕」，不改动任何颜色/样式/布局。
         self.setAcceptDrops(True)
-        self.setFixedSize(PLAYER_W, PLAYER_H)
+        # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放。
+        # 用 resize + setMinimumSize 取代 setFixedSize，保证用户可自由拉伸窗口。
+        self.setMinimumSize(340, 280)
+        self.resize(360, 300)
+        make_resizable(self, tag="PlayerWindow")
         self._apply_window_mask()
         self._build()
         self._disable_default_buttons()
@@ -2325,7 +2329,8 @@ class PlayerWindow(QDialog):
         self.list.setObjectName("playlist")
         self.list.setWidgetResizable(True)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.list.setFixedHeight(TRACK_ROW_H * PLAYLIST_VISIBLE_ROWS)
+        # 最小高度 = 5 行；窗口被用户拉高时列表区随之拉伸（自适应布局）
+        self.list.setMinimumHeight(TRACK_ROW_H * PLAYLIST_VISIBLE_ROWS)
         self.list.verticalScrollBar().valueChanged.connect(self._maybe_load_more_remote)
         self.playlist_body = QWidget()
         self.playlist_body.setObjectName("playlistBody")
@@ -2333,9 +2338,9 @@ class PlayerWindow(QDialog):
         self.playlist_layout.setContentsMargins(0, 0, 0, 18)
         self.playlist_layout.setSpacing(0)
         self.list.setWidget(self.playlist_body)
-        panel.addWidget(self.list)
+        panel.addWidget(self.list, 1)
         self.playlist_panel.hide()
-        body.addWidget(self.playlist_panel)
+        body.addWidget(self.playlist_panel, 1)
         self._build_drop_overlay()
 
     def _build_drop_overlay(self):
@@ -2502,7 +2507,7 @@ class PlayerWindow(QDialog):
             self.playlist_panel.hide()
             self.card.set_expanded(False)
             self._filter(self._search_query)
-        self.setFixedSize(PLAYER_W, PLAYER_H)
+        self.resize(PLAYER_W, PLAYER_H)
         self._dock_to_work_area_bottom(align_right=True)
 
     def mousePressEvent(self, e):  # noqa: N802
@@ -2596,7 +2601,8 @@ class PlayerWindow(QDialog):
         self._expanded = not self._expanded
         self.playlist_panel.setVisible(self._expanded)
         self.card.set_expanded(self._expanded)
-        self.setFixedSize(PLAYER_W, PLAYER_EXPANDED_H if self._expanded else PLAYER_H)
+        # 保留用户当前宽度，仅按模式切换高度（不再 setFixedSize 锁死尺寸）
+        self.resize(self.width(), PLAYER_EXPANDED_H if self._expanded else PLAYER_H)
         if self._auto_dock_enabled:
             self._dock_to_work_area_bottom()
         if self._expanded:

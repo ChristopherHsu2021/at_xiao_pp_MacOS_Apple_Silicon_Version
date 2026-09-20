@@ -16,6 +16,7 @@ from app.core import alarm as alarm_mod, assets, config
 from app.core.i18n import tr
 from app.core.voice import say
 from app.ui.common import PeekCard, NoticeDialog
+from app.ui.screen_fit import fit_window
 from app.ui.context_menu import ActionPopupMenu
 
 
@@ -315,9 +316,10 @@ class AlarmWindow(QDialog):
         self._field_labels = []
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._list_size = (380, 460)
-        self._add_size = (340, 640)
-        self.setFixedSize(*self._list_size)
+        self._list_size = (400, 480)
+        self._add_size = (360, 660)
+        # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
+        fit_window(self, "alarm_list", resizable=True)
         self._build()
 
     def _build(self):
@@ -640,7 +642,7 @@ class AlarmWindow(QDialog):
         self._form_title.setText(tr("添加闹钟"))
         self.delete_b.hide()
         self._reset_form()
-        self.setFixedSize(*self._add_size)
+        self.resize(*self._add_size)
         self.stack.setCurrentIndex(1)
 
     def _show_edit(self, alarm):
@@ -648,14 +650,14 @@ class AlarmWindow(QDialog):
         self._populate_form(self._editing_alarm)
         self._form_title.setText(tr("编辑闹钟"))
         self.delete_b.show()
-        self.setFixedSize(*self._add_size)
+        self.resize(*self._add_size)
         self.stack.setCurrentIndex(1)
 
     def _show_list(self):
         self._editing_alarm = None
         if hasattr(self, "delete_b"):
             self.delete_b.hide()
-        self.setFixedSize(*self._list_size)
+        self.resize(*self._list_size)
         self.stack.setCurrentIndex(0)
 
     def _reset_form(self):

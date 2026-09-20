@@ -119,7 +119,8 @@ class MovableLabel(QLabel):
 
 class SceneWindow(GlassWindow):
     def __init__(self, ctx, kind, name):
-        super().__init__(ctx, f"{tr(kind)} · {tr(name)}", 460, 400)
+        # MacBook Air 2020（1440×900）基准的舒适默认大小
+        super().__init__(ctx, f"{tr(kind)} · {tr(name)}", 520, 440)
         self.kind = kind
         self.name = name
         self.triggered = False

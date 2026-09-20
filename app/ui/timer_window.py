@@ -11,6 +11,7 @@ from app.core import config
 from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.common import PeekCard
+from app.ui.screen_fit import fit_window
 
 
 TIMER_QSS = """
@@ -151,7 +152,8 @@ class TimerWindow(QDialog):
         self._drag_pos = None
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(305, 253)
+        # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
+        fit_window(self, "timer", resizable=True)
 
         self._tick = QTimer(self)
         self._tick.timeout.connect(self._on_tick)

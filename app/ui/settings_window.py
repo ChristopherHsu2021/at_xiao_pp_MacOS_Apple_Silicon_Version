@@ -15,6 +15,7 @@ from app.core import admin_auth, config, pathutil, voice_media
 from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.common import PeekCard
+from app.ui.screen_fit import fit_window
 
 
 LANGS = [("简体中文", "zh-CN"), ("繁體中文", "zh-TW"), ("English", "en")]
@@ -352,7 +353,8 @@ class SettingsWindow(QDialog):
         self._in_admin_voice = False
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(480, 560)
+        # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
+        fit_window(self, "settings", resizable=True)
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)

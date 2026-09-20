@@ -29,6 +29,7 @@ from app.ui.common import (
     PeekCard, NoticeDialog, promote_popup_topmost,
     EditContextMenu, CTX_MENU_TEXT_QSS,
 )
+from app.ui.screen_fit import fit_window
 from app.ui.context_menu import ActionPopupMenu, ACTION_POPUP_QSS
 from app.ui.rich_editor import RichEditor, svg_icon
 
@@ -787,9 +788,10 @@ class TaskRow(QWidget):
             self.text.set_done(False)
 
 
-# 任务清单（列表页）窗口尺寸。桌面挂件 TodoDock 也以它的宽度为基准：
+# 任务清单（列表页）窗口尺寸（MacBook Air 2020 / 1440×900 基准：宽与桌面挂件对齐，
+# 高放宽到 560 可多显示约 8~9 条任务）。桌面挂件 TodoDock 也以它的宽度为基准：
 # 挂件里只要存在「带提醒时间」的任务，宽度就对齐到列表页（见 _DOCK_WIDTH_WITH_REMIND）。
-LIST_WINDOW_SIZE = (480, 430)
+LIST_WINDOW_SIZE = (480, 560)
 
 
 class TodoWindow(QDialog):
@@ -800,11 +802,11 @@ class TodoWindow(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._list_size = LIST_WINDOW_SIZE
-        self._add_size = (620, 720)
+        self._add_size = (480, 640)
         # 最小尺寸按模式区分：保证「无论怎么缩放，页面元素都完整可见」
-        # （列表页 460 宽 = 标题 + 四个按钮 + 边距，英文模式最宽，留足余量）
-        self._list_min = (460, 380)
-        self._add_min = (470, 560)
+        # （列表页 440 宽 = 标题 + 四个按钮 + 边距，英文模式最宽，留足余量）
+        self._list_min = (440, 380)
+        self._add_min = (440, 480)
         # 卜卜在添加/编辑页以「底面 1/3 半径的 1/4 圆」展示，大小随窗口缩放
         # （由 PeekCard.set_quarter_radius 在 resize 时按宽度动态设置）；
         # 列表页 add_mode=False，完全保持原样（零 UI 改动）。
@@ -814,6 +816,9 @@ class TodoWindow(QDialog):
         self.sticky_windows = {}
         self.setMinimumSize(*self._list_min)
         self.resize(*self._list_size)
+        # macOS：无边框窗口追加 NSResizableWindowMask，可由用户从边缘自由缩放
+        # （Windows 端复用既有 ResizeGrip 自绘握把，本调用 darwin 下才生效）
+        fit_window(self, "todo_list", resizable=True)
         self._build()
         self._build_grips()
 
@@ -1674,15 +1679,16 @@ class StickyNoteWindow(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                            | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # 最小/最大缩放尺寸：保证 420px 卡片 + 圆角 + 阴影始终显示正常、不溢出；
-        # 最小宽 400 可容纳单行 11 按钮工具栏，最小高 380 可容纳 180px 编辑器 + 工具栏
-        self.setMinimumSize(400, 380)
-        self.setMaximumSize(980, 820)
+        # 最小/最大缩放尺寸：保证卡片 + 圆角 + 阴影始终显示正常、不溢出；
+        # 最小宽 360 可容纳单行工具栏，最小高 340 可容纳编辑器 + 工具栏
+        self.setMinimumSize(360, 340)
+        self.setMaximumSize(1100, 900)
 
         self._build_note()
         self._build_view()
         self._build_grips()
-        self.resize(420, 380)
+        # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
+        fit_window(self, "sticky", resizable=True, max_size=(1100, 900))
         self.set_bg("#fffaf5")
         # 打开便签时立即载入该任务的真实标题与富文本内容（修复：之前永远显示占位符）
         self.title.setText(task.get("title", "") or "")
