@@ -2,11 +2,11 @@ name: Build macOS .dmg
 
 # 触发方式：
 #   1. 手动：仓库 Actions → Build macOS .dmg → Run workflow
-#   2. 推送 main 或打 v* tag 自动触发
+  #   2. 推送 macOS-intel-build / main 或打 v* tag 自动触发
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: ["macOS-intel-build", "main"]
     tags: ["v*"]
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rosetta 2 (x86_64 交叉编译必需)
-        run: softwareupdate --install-rosetta --agree-to-license
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
