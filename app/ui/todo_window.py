@@ -791,7 +791,7 @@ class TaskRow(QWidget):
 # 任务清单（列表页）窗口尺寸（MacBook Air 2020 / 1440×900 基准：宽与桌面挂件对齐，
 # 高放宽到 560 可多显示约 8~9 条任务）。桌面挂件 TodoDock 也以它的宽度为基准：
 # 挂件里只要存在「带提醒时间」的任务，宽度就对齐到列表页（见 _DOCK_WIDTH_WITH_REMIND）。
-LIST_WINDOW_SIZE = (440, 460)
+LIST_WINDOW_SIZE = (352, 368)
 
 
 class TodoWindow(QDialog):
@@ -802,7 +802,7 @@ class TodoWindow(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._list_size = LIST_WINDOW_SIZE
-        self._add_size = (440, 560)
+        self._add_size = (352, 448)
         # 最小尺寸 = 各模式默认尺寸（用户要求：只能从默认大小放大，不能缩小）
         # （列表页 440 宽 = 标题 + 四个按钮 + 边距，英文模式最宽，留足余量）
         self._list_min = self._list_size
@@ -1680,7 +1680,7 @@ class StickyNoteWindow(QWidget):
                            | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # 最小 = 默认缩放尺寸（用户要求只能放大）；最小宽 400 可容纳单行工具栏，最小高 380 容纳编辑器 + 工具栏
-        self.setMinimumSize(400, 380)
+        self.setMinimumSize(320, 304)
         self.setMaximumSize(1100, 900)
 
         self._build_note()

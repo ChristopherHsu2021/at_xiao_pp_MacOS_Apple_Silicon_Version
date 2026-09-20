@@ -318,8 +318,8 @@ class AlarmWindow(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
         # （最小尺寸 = 各自默认尺寸，见 _show_* 内的 setMinimumSize）
-        self._list_size = (380, 420)
-        self._add_size = (400, 540)
+        self._list_size = (304, 336)
+        self._add_size = (320, 432)
         fit_window(self, "alarm_list", resizable=True)
         self._build()
 

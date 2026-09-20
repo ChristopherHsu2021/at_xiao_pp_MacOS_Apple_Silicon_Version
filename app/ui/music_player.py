@@ -162,9 +162,9 @@ QScrollBar::handle:vertical { background: rgba(160,142,122,0.42); border-radius:
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 """).replace("{ui_font}", UI_FONT_STACK)
 
-PLAYER_W = 336
-PLAYER_H = 280
-PLAYER_EXPANDED_H = 548
+PLAYER_W = 269
+PLAYER_H = 224
+PLAYER_EXPANDED_H = 438
 PLAYLIST_VISIBLE_ROWS = 5
 TRACK_ROW_H = 36
 REMOTE_PAGE_SIZE = 30

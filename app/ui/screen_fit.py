@@ -14,21 +14,23 @@ from PyQt6.QtCore import QSize
 # 逻辑可视区域（UI 基准）
 SCREEN_LOGICAL = QSize(1440, 900)
 
-# 桌面 TodoDock 宽度基准（保持 336；仅当存在「带提醒」任务时对齐列表页宽度）
-DOCK_BASE_WIDTH = 336
+# 桌面 TodoDock 宽度基准（与 _DOCK_WIDTH 对齐，1440×900 基准的 80% = 269；当前未直接使用，保留作参考）
+DOCK_BASE_WIDTH = 269
 
 # 各窗口默认尺寸 (w, h) —— 首次打开的舒适大小（按 1440×900 可视区收紧）
+# 等比缩放到 MacBook Air 2020 基准的 80%（2026-09-20）：在 1440×900 可视区更克制，
+# 单开一两个窗口也能轻松排布；最小尺寸仍 = 默认尺寸（只能放大）。
 WINDOW_DEFAULTS = {
-    "todo_list": (440, 460),
-    "todo_add": (440, 560),
-    "sticky": (400, 380),
-    "settings": (460, 520),
-    "player": (336, 280),
-    "alarm_list": (380, 420),
-    "alarm_add": (400, 540),
-    "timer": (300, 250),
-    "scene": (460, 390),
-    "status": (340, 205),
+    "todo_list": (352, 368),
+    "todo_add": (352, 448),
+    "sticky": (320, 304),
+    "settings": (368, 416),
+    "player": (269, 224),
+    "alarm_list": (304, 336),
+    "alarm_add": (320, 432),
+    "timer": (240, 200),
+    "scene": (368, 312),
+    "status": (272, 164),
 }
 
 # 最小尺寸 = 默认尺寸（用户要求：窗口只能从默认大小「放大」，不能缩到默认之下）
