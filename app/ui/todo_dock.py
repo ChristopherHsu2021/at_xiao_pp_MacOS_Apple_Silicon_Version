@@ -73,6 +73,7 @@ _DOCK_WIDTH = 336            # 与音乐播放器主窗口 PLAYER_W 保持一致
 _DOCK_WIDTH_WITH_REMIND = LIST_WINDOW_SIZE[0]
 _DOCK_MARGIN = 12
 _DOCK_TITLE_GAP = 10
+_DOCK_VISIBLE_ROWS = 5   # 可视区固定显示 5 条任务，多出来的靠滚动查看
 
 
 def _any_remind(tasks):
@@ -272,12 +273,28 @@ class TodoDock(QWidget):
             self._render()
 
     def _fit_height(self):
-        """按内容高度自适应窗口高度（整宽固定）；过高则限制并启用内部滚动。"""
+        """可视高度 = 标题 + **最多 5 条任务**；超过 5 条则高度固定，其余靠滚动查看。
+
+        不足 5 条时按实际内容收窄（挂件是透明窗口，多出来的空高度只会白白吃掉
+        空白处的点击穿透区域）；超过 5 条时按「前 5 行的实际高度和」定高，
+        QScrollArea 自动出现纵向滚动条，滚轮/拖滚动条都能翻。
+        屏幕太矮时再夹一道 max_h，避免把整屏占满。
+        """
         screen = QApplication.primaryScreen()
         avail_h = screen.availableGeometry().height() if screen is not None else 800
         max_h = max(120, avail_h - 40)
-        hint = self.sizeHint().height()
-        self.setFixedHeight(min(hint, max_h))
+
+        self.list_lay.activate()                       # 先让行布局生效，sizeHint 才准
+        rows = self.list_widget.findChildren(TaskRow)
+        inner = self.list_widget.sizeHint().height()   # 全部行（或「暂无任务」）的高度
+        if rows:
+            heights = [r.sizeHint().height() for r in rows]
+            visible = sum(heights[:_DOCK_VISIBLE_ROWS])
+        else:
+            visible = inner                             # 空状态：一个「暂无任务」的高度
+        # 窗口非列表部分（上下内边距 + 标题 + 标题与列表间距 + 滚动区边框）
+        chrome = max(0, self.sizeHint().height() - inner)
+        self.setFixedHeight(min(chrome + visible, max_h))
 
     # ---------------- 交互区判定（跨平台共用）----------------
     def _widget_rect_in_window(self, w):
