@@ -538,6 +538,54 @@ def build_app() -> Path:
     return app
 
 
+def _write_first_open_readme(path: Path, app_name: str,
+                             dmg_name: str = "AT小PP-macos.dmg") -> None:
+    """把「首次打开被 Gatekeeper 拦截」的处置办法随 dmg 一起发出去。
+
+    背景：本应用只有 ad-hoc 自签名（免费），没有 Apple Developer ID 签名 + 公证
+    （notarization，需付费开发者账号）。因此从浏览器/微信等网络渠道下载的 dmg/app
+    会被打上 com.apple.quarantine → 双击报「Apple 无法验证…是否包含恶意软件」。
+    这不是包损坏，去掉隔离属性即可；本地拷贝（U 盘/局域网）不带该属性，无此问题。
+    """
+    text = f"""【首次打开必读】被 macOS 拦住了？照下面任一方式做一次即可，之后正常使用。
+
+一、为什么会被拦
+    你正在打开的 {dmg_name} 来自网络下载（浏览器/微信/网盘等）。macOS 会给这类
+    文件打上“来源：网络”的隔离标记，而本应用**没有 Apple 付费开发者证书做公证**，
+    所以双击时弹出：
+        未打开“AT小PP-macos.dmg”
+        Apple 无法验证“AT小PP-macos.dmg”是否包含可能危害 Mac 安全或泄漏隐私的恶意软件。
+    这是分发签名限制，**不是文件损坏**，也不是病毒感染。
+
+二、方式一：终端两行命令（最快、最彻底）
+    打开「终端」，粘贴执行（第一行处理 dmg，第二行处理安装后的 App）：
+        xattr -dr com.apple.quarantine ~/Downloads/AT小PP-macos.dmg
+        # 双击 dmg → 把 {app_name} 拖进「应用程序」→ 再执行：
+        xattr -dr com.apple.quarantine /Applications/{app_name}
+    （若文件不在“下载”目录，把路径换成实际位置；路径含空格要加引号）
+
+三、方式二：不用终端
+    1) 右键点击 AT小PP-macos.dmg → 选「打开」→ 弹窗里再点一次「打开」。
+    2) 若弹窗只有「完成 / 移到废纸篓」没有「打开」：
+       打开「系统设置 → 隐私与安全性」，向下拉到底部，会出现
+       “已阻止使用 AT小PP-macos.dmg”，点「仍要打开」，然后重新双击即可。
+    3) 安装到「应用程序」后首次运行若再拦一次，对 {app_name} 重复步骤 1) 即可。
+
+四、想彻底免掉这些步骤？
+    唯一办法是购买 Apple Developer Program（99 美元/年），用 Developer ID 证书
+    签名并提交公证（notarize）。免费方案做不到。
+
+五、机型提醒
+    arm64 包：仅适用于 M 系列芯片（M1/M2/M3/M4…）的 Mac。
+    Intel 芯片的 Mac 请改用 Intel 兼容版（文件名带 intel 的那个包）。
+"""
+    try:
+        path.write_text(text, encoding="utf-8")
+        print(f"wrote 首次打开必读：{path}")
+    except OSError as exc:  # noqa: BLE001
+        print(f"警告：写入首次打开说明失败（不影响打包）：{exc}")
+
+
 def _detach_stale(volname: str) -> None:
     """卸载可能残留的同名挂载点（hdiutil "Resource busy" 的常见来源）。
 
@@ -605,6 +653,12 @@ def build_dmg(app_dir: Path) -> Path:
 
     # Applications 快捷方式（拖放安装入口：把 .app 拖进这里即装到 /Applications）
     os.symlink("/Applications", str(stage / "Applications"))
+
+    # 首次打开必读：未做 Apple 公证（需要付费开发者账号）时，从网络下载的 dmg/app
+    # 带 com.apple.quarantine 属性 → 双击必被 Gatekeeper 拦（"Apple 无法验证…"）。
+    # 这属于「分发限制」而非包损坏，把处置办法随包带走，避免用户以为拿到的是坏包。
+    _write_first_open_readme(stage / "首次打开必读.txt", app_dir.name,
+                             dmg_name=(RELEASE / "AT小PP-macos.dmg").name)
 
     dmg = RELEASE / "AT小PP-macos.dmg"
     if dmg.exists():
