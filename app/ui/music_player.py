@@ -52,6 +52,7 @@ if IS_MAC:
 from app.core.voice import say
 from app.core.i18n import tr
 from app.ui.context_menu import MENU_QSS
+from app.ui.mac_window import apply_stage_exempt
 
 
 PLAYER_QSS = ("""
@@ -1796,6 +1797,8 @@ def _apply_macos_always_on_top(widget):
     except Exception:
         # 任何环境差异 / PyObjC 缺失都不应影响主流程
         pass
+    # 台前调度豁免：歌词浮窗必须一直留在舞台上（不动层级，上面已锁浮层）
+    apply_stage_exempt(widget, tag="LyricOverlay")
 
 
 class LyricOverlayWindow(QDialog):

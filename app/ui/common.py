@@ -15,6 +15,7 @@ import sys
 
 from app.core.i18n import tr
 from app.ui.style import GLASS_STYLE, COLOR
+from app.ui.mac_window import apply_stage_exempt
 
 # SetWindowPos 标志：NOSIZE(0x1) | NOMOVE(0x2) | NOACTIVATE(0x10) | SHOWWINDOW(0x40)
 _SWP_BASE = 0x0001 | 0x0002 | 0x0010 | 0x0040
@@ -310,6 +311,13 @@ class GlassWindow(QDialog):
 
         bar.mousePressEvent = self._bar_press
         bar.mouseMoveEvent = self._bar_move
+
+    def showEvent(self, e):  # noqa: N802
+        # macOS 专属：把本窗口登记为「不受台前调度影响」——切到其它 App /
+        # 舞台重排时不会被收进侧边条。只改窗口行为、**不动层级**，
+        # 现有的置顶 / 让路（keep_on_top / release_topmost）语义保持不变。
+        super().showEvent(e)
+        apply_stage_exempt(self, tag=type(self).__name__)
 
     def set_title(self, title: str):
         self.title_label.setText(title)

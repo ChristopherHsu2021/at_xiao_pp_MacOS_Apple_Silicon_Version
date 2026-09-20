@@ -26,6 +26,7 @@ from app.core.i18n import tr
 from app.ui.status_panel import StatusPanel
 from app.ui.context_menu import build_menu
 from app.ui.common import UploadPrompt
+from app.ui.mac_window import apply_stage_exempt
 
 
 def _apply_macos_always_on_top(widget):
@@ -50,6 +51,9 @@ def _apply_macos_always_on_top(widget):
     except Exception:
         # 任何环境差异 / PyObjC 缺失都不应影响主流程
         pass
+    # 台前调度豁免：桌宠必须留在舞台上，切 App / 舞台重排都不能把它收走
+    # （不动层级：上面的浮层层级已经设过，这里只补窗口行为）
+    apply_stage_exempt(widget, tag="PetWindow")
 
 
 EMOJIS = [

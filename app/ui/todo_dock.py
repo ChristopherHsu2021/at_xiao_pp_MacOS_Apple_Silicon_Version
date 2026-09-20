@@ -47,7 +47,7 @@ from PyQt6.QtCore import Qt, QPoint, QRect
 
 from app.core import todo
 from app.core.i18n import tr
-from app.ui.todo_window import TaskRow
+from app.ui.todo_window import TaskRow, LIST_WINDOW_SIZE
 from app.ui.mac_window import (
     IS_MAC, apply_desktop_widget_style, install_hit_test_router, mac_log,
 )
@@ -68,8 +68,19 @@ if sys.platform == "win32":
 # 标题行高度约 20px；行上下内边距各 10px → 项间距 20px。
 # 标题行 ↔ 列表首项的间距也设为 10（布局 spacing）+ 首项上内边距 10 = 20px，与项间距一致。
 _DOCK_WIDTH = 336            # 与音乐播放器主窗口 PLAYER_W 保持一致
+# 宽版：只要存在「带提醒时间」的任务，挂件宽度就对齐任务清单页（480）。
+# 提醒时间是「年-月-日 时:分」的长串，336px 下会把标题挤得只剩省略号。
+_DOCK_WIDTH_WITH_REMIND = LIST_WINDOW_SIZE[0]
 _DOCK_MARGIN = 12
 _DOCK_TITLE_GAP = 10
+
+
+def _any_remind(tasks):
+    """是否存在「带提醒时间」的任务（判定与 TaskRow 一致：remind_enabled 关掉不算）。"""
+    for t in tasks or ():
+        if t.get("remind") and t.get("remind_enabled", True):
+            return True
+    return False
 
 
 class TodoDock(QWidget):
@@ -207,6 +218,14 @@ class TodoDock(QWidget):
                 w.setParent(None)
                 w.deleteLater()
         tasks = todo.all_tasks()
+        # 宽度自适应：有任务带提醒 → 对齐任务清单页宽度；取消提醒后没有一个任务
+        # 带提醒 → 恢复 336。宽度变化后必须立即重排，否则 _fit_height 会按旧宽度算高度。
+        target = _DOCK_WIDTH_WITH_REMIND if _any_remind(tasks) else _DOCK_WIDTH
+        if self.width() != target:
+            self.setFixedWidth(target)
+            lay = self.layout()
+            if lay is not None:
+                lay.activate()
         if not tasks:
             empty = QLabel(tr("暂无任务"))
             empty.setObjectName("dockEmpty")
@@ -215,15 +234,35 @@ class TodoDock(QWidget):
         else:
             for t in tasks:
                 # 挂件：禁用右键菜单、禁用点击标题开便签；勾选回调刷新自身并同步主窗口。
+                # open_sticky_on_click=True：点标题文字打开该任务的便签卡片
+                # （TaskRow 走 self.window().open_sticky(task) → 见本类 open_sticky）
                 self.list_lay.addWidget(
                     TaskRow(t, self._after_toggle, None, None, self.ctx.stop_alarm,
-                            enable_context_menu=False, open_sticky_on_click=False)
+                            enable_context_menu=False, open_sticky_on_click=True,
+                            glass_tag=True)
                 )
         self._fit_height()
         # 兜底穿透方案的属性挂在「行控件」上，_render 重建行后必须重新补挂，
         # 否则刷新出来的行会吞掉鼠标事件（原生 hitTest 方案无此问题）。
         if self._wa_fallback:
             _apply_granular_wa(self)
+
+    def open_sticky(self, task):
+        """点击挂件里的任务标题 → 打开（或聚焦）该任务的便签卡片。
+
+        TaskRow._open_sticky 调的是 ``self.window().open_sticky(task)``，挂件自己就是
+        顶层窗口，所以这里做桥接：便签注册表 ``sticky_windows`` 挂在待办窗口上，
+        先**静默**确保待办窗口实例存在（不显示它，避免点标题时顺带弹出任务清单页），
+        再交给它打开便签。
+        """
+        todo_win = self.ctx.windows.get("todo")
+        if todo_win is None:
+            ensure = getattr(self.ctx, "ensure_todo_window", None)
+            todo_win = ensure() if ensure is not None else None
+        if todo_win is None:
+            return
+        # 便签窗口自带 WindowStaysOnTopHint（见 StickyNoteWindow），无需再补置顶
+        todo_win.open_sticky(task)
 
     def _after_toggle(self):
         """复选框切换：同步主待办窗口（若已打开，其 _render 会再刷新本挂件）；

@@ -18,6 +18,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QColor, QPainter, QPen, QBrush, QCursor, QIcon, QPainterPath, QVector3D, QPalette,
+    QLinearGradient,
 )
 
 from app.core import todo, config
@@ -197,13 +198,34 @@ def priority_tag_colors(prio: str):
 class TagLabel(QLabel):
     """自绘圆角标签：用 QPainter 画圆角矩形背景（radius 指定，默认胶囊形），
     避免 QSS border-radius 大半径被 Qt 忽略导致圆角不生效；
-    文字居中绘制，不会被裁切。用于列表行右侧的「提醒时间 / 优先级」标签。"""
+    文字居中绘制，不会被裁切。用于列表行右侧的「提醒时间 / 优先级」标签。
 
-    def __init__(self, text="", bg=TAG_BG, fg=TAG_FG, radius=8, parent=None):
+    玻璃模式（glass=True，桌面挂件 TodoDock 的优先级标签使用）：
+    全透明挂件贴在桌面上，实色标签会显得很"贴纸"。这里改成
+    「带颜色的半透明毛玻璃」——
+      1) 彩色半透明底（alpha≈0.30，桌面/壁纸透出来，底色仍保留色相）；
+      2) 上白下暗的纵向渐变（玻璃的厚度与反光感）；
+      3) 同色系细描边（alpha≈0.55，勾出玻璃边缘，避免半透明糊掉边界）；
+      4) 文字色压深一档，保证在半透明底上仍然清晰。
+    纯 Qt 绘制、跨平台一致，不依赖任何原生模糊/截屏（mac 上抓屏会触发
+    屏幕录制权限弹窗，故不采用真·背景模糊）。"""
+
+    # 玻璃模式的绘制参数（集中在此，便于统一调参）
+    # 注意：玻璃底色用**优先级主色**（低绿/中橙/高红），不能用标签的浅色底
+    # （#FDECEC 那类浅色半透明后几乎等于白色，在浅色壁纸上完全看不出颜色）。
+    _GLASS_FILL_ALPHA = 95        # 彩色底透明度（≈0.37，既能透出壁纸又保留色相）
+    _GLASS_EDGE_ALPHA = 190       # 描边透明度
+    _GLASS_TOP_LIGHT = 55         # 顶部高光（白）
+    _GLASS_MID_LIGHT = 18         # 中段高光
+    _GLASS_BOTTOM_SHADE = 34      # 底部暗调（玻璃厚度）
+    _GLASS_TEXT_DARKEN = 118      # 文字压深（0-255 全黑为 0）
+
+    def __init__(self, text="", bg=TAG_BG, fg=TAG_FG, radius=8, glass=False, parent=None):
         super().__init__(text, parent)
         self._bg = QColor(bg)
         self._fg = QColor(fg)
         self._radius = float(radius)
+        self._glass = bool(glass)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setContentsMargins(10, 3, 10, 3)
@@ -212,17 +234,63 @@ class TagLabel(QLabel):
         self._bg, self._fg = QColor(bg), QColor(fg)
         self.update()
 
+    def set_glass(self, on: bool):
+        """切换毛玻璃模式（桌面挂件用 True，卡片列表页保持实色）。"""
+        on = bool(on)
+        if on != self._glass:
+            self._glass = on
+            self.update()
+
     def paintEvent(self, e):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._bg)
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), self._radius, self._radius)
-        painter.setPen(self._fg)
+        rect = self.rect().adjusted(0, 0, -1, -1)
+        if self._glass:
+            self._paint_glass(painter, rect)
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._bg)
+            painter.drawRoundedRect(rect, self._radius, self._radius)
+        # 文字：玻璃模式下压深一档，保证半透明底上的对比度
+        text_color = self._fg
+        if self._glass:
+            text_color = self._fg.darker(self._GLASS_TEXT_DARKEN)
+        painter.setPen(text_color)
         painter.setFont(self.font())
         painter.drawText(self.rect(),
                          int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter),
                          self.text())
+
+    def _paint_glass(self, painter, rect):
+        """毛玻璃底：半透明彩色 + 上白下暗渐变 + 同色系细描边。"""
+        r = self._radius
+        # 1) 彩色半透明底
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(self._bg.red(), self._bg.green(), self._bg.blue(),
+                                self._GLASS_FILL_ALPHA))
+        painter.drawRoundedRect(rect, r, r)
+
+        # 2) 玻璃厚度：纵向渐变（顶亮、底暗）。渐变直接当画刷画圆角矩形 ——
+        #    天然贴合圆角，不需要 setClipPath（那套写法在本项目的 Qt/offscreen
+        #    组合下会直接崩进程，已实测排除）。
+        grad = QLinearGradient(0, rect.top(), 0, rect.bottom() + 1)
+        grad.setColorAt(0.0, QColor(255, 255, 255, self._GLASS_TOP_LIGHT))
+        grad.setColorAt(0.55, QColor(255, 255, 255, self._GLASS_MID_LIGHT))
+        grad.setColorAt(1.0, QColor(0, 0, 0, self._GLASS_BOTTOM_SHADE))
+        painter.setBrush(QBrush(grad))
+        painter.drawRoundedRect(rect, r, r)
+
+        # 3) 同色系细描边：勾出玻璃边缘（纯半透明会糊掉边界）。
+        #    坑（实测）：先前用「setBrush(Qt.BrushStyle.NoBrush) + QPen(color, 1)
+        #    + QRect.adjusted(0.5,...) 描边」这套写法，在本项目的 Qt 组合下绘制时
+        #    直接崩进程（无 traceback，进程静默退出）。改为「透明 QColor 画刷 +
+        #    原矩形 + 浮点线宽 + 显式 PenStyle」后稳定，别再改回去。
+        edge = self._bg.darker(140)
+        painter.setBrush(QColor(0, 0, 0, 0))     # 透明画刷：只描边不填充
+        painter.setPen(QPen(QColor(edge.red(), edge.green(), edge.blue(),
+                                   self._GLASS_EDGE_ALPHA),
+                            1.0, Qt.PenStyle.SolidLine))
+        painter.drawRoundedRect(rect, r, r)
 
 class ElideLabel(QLabel):
     """单行标题标签：宽度不足时右侧省略号；鼠标悬停时横向滑动展示完整文字。
@@ -592,8 +660,13 @@ class ResizeGrip(QWidget):
 
 class TaskRow(QWidget):
     def __init__(self, task, on_toggle, on_edit=None, on_delete=None, on_interact=None,
-                 enable_context_menu=True, open_sticky_on_click=True):
+                 enable_context_menu=True, open_sticky_on_click=True, glass_tag=False):
+        """glass_tag=True：优先级标签用「带颜色的半透明毛玻璃」底（桌面挂件 TodoDock 用）。
+
+        列表页/便签页仍是实色卡片背景，标签保持实色更清晰 → 默认 False。
+        """
         super().__init__()
+        self.glass_tag = bool(glass_tag)
         self.task = task
         self.on_toggle = on_toggle
         self.on_edit = on_edit
@@ -632,7 +705,13 @@ class TaskRow(QWidget):
             meta_lay.addWidget(self._make_tag(due_text, TAG_BG, TAG_FG))
         # 优先级标签文字跟随语言（低/中/高 → Low/Medium/High）；配色仍按原始中文键查表，
         # 数据库里的 priority 值保持「低/中/高」不改，避免破坏既有数据与逻辑。
-        meta_lay.addWidget(self._make_tag(tr(prio), *priority_tag_colors(prio)))
+        prio_bg, prio_fg = priority_tag_colors(prio)
+        if self.glass_tag:
+            # 毛玻璃底改用优先级主色（低绿/中橙/高红）：浅色底半透明后等于白色，
+            # 在桌面上完全看不出优先级。
+            prio_bg = _PRIO_DOT_COLORS.get(prio, prio_bg)
+        meta_lay.addWidget(
+            self._make_tag(tr(prio), prio_bg, prio_fg, glass=self.glass_tag))
         self.meta.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         if enable_context_menu:
             self.meta.contextMenuEvent = self._show_context_menu
@@ -641,9 +720,9 @@ class TaskRow(QWidget):
         lay.addWidget(self.meta)
         self._apply()
 
-    def _make_tag(self, text, bg, fg, radius=8):
+    def _make_tag(self, text, bg, fg, radius=8, glass=False):
         """右侧圆角标签；不给它收缩空间，保证标签文字永远完整。"""
-        tag = TagLabel(text, bg, fg, radius)
+        tag = TagLabel(text, bg, fg, radius, glass=glass)
         if self.enable_context_menu:
             tag.contextMenuEvent = self._show_context_menu
         return tag
@@ -708,6 +787,11 @@ class TaskRow(QWidget):
             self.text.set_done(False)
 
 
+# 任务清单（列表页）窗口尺寸。桌面挂件 TodoDock 也以它的宽度为基准：
+# 挂件里只要存在「带提醒时间」的任务，宽度就对齐到列表页（见 _DOCK_WIDTH_WITH_REMIND）。
+LIST_WINDOW_SIZE = (480, 430)
+
+
 class TodoWindow(QDialog):
     def __init__(self, ctx):
         super().__init__()
@@ -715,7 +799,7 @@ class TodoWindow(QDialog):
         self._drag_pos = None
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._list_size = (480, 430)
+        self._list_size = LIST_WINDOW_SIZE
         self._add_size = (620, 720)
         # 最小尺寸按模式区分：保证「无论怎么缩放，页面元素都完整可见」
         # （列表页 460 宽 = 标题 + 四个按钮 + 边距，英文模式最宽，留足余量）

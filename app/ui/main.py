@@ -47,6 +47,7 @@ from app.ui.tray import TrayManager
 from app.ui.music_player import MusicPlayer
 from app.ui.todo_window import TodoWindow
 from app.ui.todo_dock import TodoDock
+from app.ui.mac_window import apply_stage_exempt
 from app.ui.alarm_window import AlarmWindow
 from app.ui.timer_window import TimerWindow
 from app.ui.settings_window import SettingsWindow
@@ -250,6 +251,8 @@ class App:
             return
 
         self._topmost_released = False
+        # macOS：统一重申「台前调度豁免」（只补窗口行为、不动层级）
+        self._apply_mac_stage_exemption()
         active = QApplication.activeWindow()
         if not state.hidden and self.pet.isVisible():
             keep_on_top(self.pet)
@@ -265,6 +268,38 @@ class App:
             owned = owned or active is self.music.window
             if owned:
                 keep_on_top(active, bring_to_front=True)
+
+    # ---------------- macOS：台前调度豁免（全软件统一兜底）----------------
+    def _apply_mac_stage_exemption(self):
+        """macOS 专属：本程序所有可见顶层窗口都不被台前调度收走。
+
+        卡片窗口（待办/闹钟/计时/设置/场景/播放器）与桌面挂件（桌宠/TodoDock/
+        歌词浮窗）都只补「窗口行为」—— CanJoinAllApplications + Stationary +
+        CanJoinAllSpaces + FullScreenAuxiliary + IgnoresCycle + 失活不隐藏，
+        **不动层级**，现有的置顶 / 让路（keep_on_top / release_topmost）语义照旧。
+        定时器每 1.5s 与激活状态变化时重申，覆盖新开窗口与 Qt 重建原生窗口的情况
+        （幂等，见 app/ui/mac_window.py）。
+        """
+        if sys.platform != "darwin":
+            return
+        try:
+            for w in self._exempt_widgets():
+                if w is not None and w.isVisible():
+                    apply_stage_exempt(w, tag=type(w).__name__)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _exempt_widgets(self):
+        """需要台前调度豁免的本程序窗口（不含瞬时弹窗，避免误伤）。"""
+        widgets = [self.pet, self.scene, getattr(self, "todo_dock", None)]
+        widgets += list(self.windows.values())
+        music_window = getattr(self.music, "window", None)
+        if music_window is not None:
+            widgets.append(music_window)
+        lyric = getattr(self.music, "lyric_overlay", None)
+        if lyric is not None:
+            widgets.append(lyric)
+        return widgets
 
     def begin_popup_menu(self):
         self._popup_menu_open = True
@@ -313,6 +348,18 @@ class App:
 
     def open_todo(self):
         self._single("todo", lambda: TodoWindow(self))
+
+    def ensure_todo_window(self):
+        """确保待办窗口实例存在（它持有便签注册表 sticky_windows），但**不显示**它。
+
+        用于桌面挂件点击任务标题开便签：只弹便签卡片，不顺带弹出任务清单页。
+        之后用户从托盘打开「待办」时，_single 会复用这个已存在的实例。
+        """
+        win = self.windows.get("todo")
+        if win is None:
+            win = TodoWindow(self)
+            self.windows["todo"] = win
+        return win
 
     def open_alarm(self):
         self._single("alarm", lambda: AlarmWindow(self))

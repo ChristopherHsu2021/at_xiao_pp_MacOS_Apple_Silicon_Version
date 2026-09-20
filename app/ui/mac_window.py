@@ -228,15 +228,26 @@ def ns_window_pointer(widget):
         return None
 
 
-def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verbose=False):
-    """把窗口登记为「桌面挂件」：台前调度/调度中心/空间切换都动不了它。
+_LOGGED_FAIL = set()   # 同一 tag 的失败只记一次，避免定时重申刷爆日志
 
-    - collectionBehavior：DESKTOP_WIDGET_BEHAVIOR（加入所有 App 舞台 + 常驻所有空间
-      + 不被 Mission Control 挪动 + 不进窗口循环）
-    - level：floating=True → NSFloatingWindowLevel（浮层面板，台前调度不收）
-    - hidesOnDeactivate=False：切换 App 不隐藏
 
-    返回 True 表示已生效（会回读 level / collectionBehavior 做校验）。
+def apply_stage_exempt(widget, floating=None, tag="app-window", verbose=False):
+    """macOS：让窗口不被「台前调度 / Mission Control / 空间切换」收走或重排。
+
+    这是**整个软件**层面的豁免，卡片窗口（待办/闹钟/计时/设置/播放器/场景）与
+    桌面挂件（桌宠 / TodoDock / 歌词浮窗）都要有，否则切到别的 App 时本程序窗口
+    会被整体移出舞台，缩到屏幕左侧的「最近使用的 App」条里。
+
+    - ``hidesOnDeactivate = NO``：面板（Qt.Tool）默认在应用失活时隐藏，桌面常驻
+      窗口必须关掉。
+    - ``collectionBehavior = DESKTOP_WIDGET_BEHAVIOR``：加入所有 App 的舞台
+      (CanJoinAllApplications) + 常驻所有空间 (CanJoinAllSpaces) + 不被 Mission
+      Control 挪动 (Stationary) + 伴随全屏 (FullScreenAuxiliary) + 不进窗口循环
+      (IgnoresCycle)。
+    - ``floating``：None = **不动层级**（保留现有置顶/让路逻辑，卡片窗口用这个）；
+      True/False = 同时锁定浮层/普通层级（桌面挂件用 True）。
+
+    幂等，可随定时/状态变化反复重申。返回 True 表示已生效（回读校验）。
     """
     if not IS_MAC:
         return False
@@ -246,18 +257,19 @@ def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verb
             return False
         win = _send_ptr(view, "window")
         if not win:
-            mac_log(f"{tag}: 取不到 NSWindow（view={view}），跳过原生挂件设置", tag="mac-error")
+            _fail_log(tag, f"取不到 NSWindow（view={view}）")
             return False
         win = int(win)
 
         _send_void_bool(win, "setHidesOnDeactivate:", False)
-        _send_void_long(win, "setLevel:", LEVEL_FLOATING if floating else LEVEL_NORMAL)
+        if floating is not None:
+            _send_void_long(win, "setLevel:", LEVEL_FLOATING if floating else LEVEL_NORMAL)
         _send_void_uint(win, "setCollectionBehavior:", DESKTOP_WIDGET_BEHAVIOR)
 
         level = _send_long(win, "level")
         behavior = _send_uint(win, "collectionBehavior")
-        ok = (behavior & DESKTOP_WIDGET_BEHAVIOR) == DESKTOP_WIDGET_BEHAVIOR
-        if ok and (not floating or level >= LEVEL_FLOATING):
+        if (behavior & DESKTOP_WIDGET_BEHAVIOR) == DESKTOP_WIDGET_BEHAVIOR and (
+                floating is not True or level >= LEVEL_FLOATING):
             if verbose:
                 mac_log(
                     f"{tag}: NSWindow={win} view={view} level={level} "
@@ -265,14 +277,27 @@ def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verb
                     tag="mac",
                 )
             return True
-        mac_log(
-            f"{tag}: 原生设置未完全生效 level={level} behavior=0x{behavior:x}",
-            tag="mac-error",
-        )
+        _fail_log(tag, f"原生设置未完全生效 level={level} behavior=0x{behavior:x}")
         return False
     except Exception as exc:  # noqa: BLE001
-        mac_log(f"{tag}: 原生挂件设置异常 {exc!r}", tag="mac-error")
+        _fail_log(tag, f"原生窗口设置异常 {exc!r}")
         return False
+
+
+def _fail_log(tag, message):
+    """失败日志按 tag 去重（定时器会反复重申，不能每次都写文件）。"""
+    if tag in _LOGGED_FAIL:
+        return
+    _LOGGED_FAIL.add(tag)
+    mac_log(f"{tag}: {message}", tag="mac-error")
+
+
+def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verbose=False):
+    """把窗口登记为「桌面挂件」：台前调度/调度中心/空间切换都动不了它。
+
+    = apply_stage_exempt(...) + 锁定浮层层级（floating=True 时）。
+    """
+    return apply_stage_exempt(widget, floating=floating, tag=tag, verbose=verbose)
 
 
 # ---------------------------------------------------------------------------
