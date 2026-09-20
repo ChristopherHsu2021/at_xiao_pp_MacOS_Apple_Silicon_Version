@@ -4,13 +4,16 @@
 - 全透明背景（FramelessWindowHint + WA_TranslucentBackground，无玻璃卡片），
   只浮出任务列表文字与复选框，像桌面便签一样贴在左上角。
 - 固定屏幕左上角；无标题栏、无拖拽手柄、无缩放握把 → 不可移动/缩放。
-- 宽度固定 336px，与音乐播放器主窗口 PLAYER_W 保持一致。无「全选/添加/返回/删除」按钮。
+- 宽度固定 269px（= 音乐播放器主窗口 PLAYER_W，1440×900 基准的 80%）。无「全选/添加/返回/删除」按钮。
 - 无右键菜单（TaskRow 传 enable_context_menu=False）。
 - 标题行「📋 任务清单」与列表首项的间距收紧到与列表项间距一致，并去除标题下横线。
+- 复选框与任务清单页共用 TodoCheckBox（尺寸/样式天然一致）。
+- **不常显「提醒时间」**：该标签是「年-月-日 时:分」长串，会明显撑宽挂件；改为在任务标题
+  上挂 hover 提示「提醒时间：年-月-日 时:分」（TaskRow(show_remind_tag=False)）。
 - 勾选复选框可直接完成/取消任务；任务数据来自 app.core.todo，与主窗口/便签共享同一数据源。
 - 软件启动时由 App 创建并 show()，退出时 hide()/close()；常驻显示（点击其它软件不会被隐藏）。
   Windows：不强制置顶（沿用现有 keep_on_top / release_topmost 机制，可被其它窗口覆盖）。
-  macOS：见下节「macOS 显示逻辑」——登记为桌面挂件，层级固定为浮层（台前调度豁免的代价）。
+  macOS：见下节「macOS 显示逻辑」——登记为桌面挂件，层级下沉到桌面层（不遮挡其它 App）。
 
 macOS 显示逻辑（与 Windows 分叉，见 app/ui/mac_window.py）：
 - 症状：mac 端左上角看不到挂件。根因是 Qt 的窗口标志不足以表达原生语义 —— 只用
@@ -47,7 +50,8 @@ from PyQt6.QtCore import Qt, QPoint, QRect
 
 from app.core import todo
 from app.core.i18n import tr
-from app.ui.todo_window import TaskRow, LIST_WINDOW_SIZE
+from app.ui.todo_window import TaskRow, LIST_WINDOW_SIZE   # noqa: F401  (LIST_WINDOW_SIZE 保留供参考/将来对齐)
+from app.ui.screen_fit import scale_qss, s
 from app.ui.mac_window import (
     IS_MAC, apply_desktop_widget_style, install_hit_test_router, mac_log,
 )
@@ -68,20 +72,14 @@ if sys.platform == "win32":
 # 标题行高度约 20px；行上下内边距各 10px → 项间距 20px。
 # 标题行 ↔ 列表首项的间距也设为 10（布局 spacing）+ 首项上内边距 10 = 20px，与项间距一致。
 _DOCK_WIDTH = 269            # 与音乐播放器主窗口 PLAYER_W 保持一致（1440×900 基准的 80%）
-# 宽版：只要存在「带提醒时间」的任务，挂件宽度就对齐任务清单页（480）。
-# 提醒时间是「年-月-日 时:分」的长串，336px 下会把标题挤得只剩省略号。
-_DOCK_WIDTH_WITH_REMIND = LIST_WINDOW_SIZE[0]
-_DOCK_MARGIN = 12
-_DOCK_TITLE_GAP = 10
+_DOCK_MARGIN = s(12)         # 左右留白（随全局 80% 缩放）
+_DOCK_VPAD = s(10)           # 挂件容器上下留白
+# 头部「📋 任务清单」与列表首项的间距：与任务清单页「项与项」的间距一致 ——
+# 行自身上下各有 s(10) 内边距，故两行之间的视觉间距 = 2×行内边距；首项还会自带一个
+# 上内边距，所以这里只需要补「一个行内边距」的布局 spacing 即可对齐（2026-09-21 意见：
+# 原间距过长，标题与首条任务之间空了一大块）。
+_DOCK_TITLE_GAP = s(10)
 _DOCK_VISIBLE_ROWS = 5   # 可视区固定显示 5 条任务，多出来的靠滚动查看
-
-
-def _any_remind(tasks):
-    """是否存在「带提醒时间」的任务（判定与 TaskRow 一致：remind_enabled 关掉不算）。"""
-    for t in tasks or ():
-        if t.get("remind") and t.get("remind_enabled", True):
-            return True
-    return False
 
 
 class TodoDock(QWidget):
@@ -141,11 +139,18 @@ class TodoDock(QWidget):
         return True
 
     def _apply_mac_outer_style(self, verbose=True):
-        """macOS 专属显示逻辑：不受台前调度影响（见 app/ui/mac_window.py 顶部说明）。"""
+        """macOS 专属显示逻辑：不受台前调度影响（见 app/ui/mac_window.py 顶部说明）。
+
+        2026-09-21 意见：「这个页面应该像与桌面融为一体的感觉，不遮挡住其他应用或界面的
+        显示」。原实现在 NSFloatingWindowLevel（浮层）→ 挂件永远压在所有 App 窗口之上，
+        文字会盖住其它软件的界面。现改为挂在**桌面层**（level="desktop"）：仍然常驻桌面、
+        所有空间可见、不被台前调度收走，但层级落到普通窗口之下 —— 其它 App 窗口一出现就
+        自然盖住它，符合「桌面挂件」的语义。
+        """
         if not IS_MAC:
             return False
         return apply_desktop_widget_style(
-            self, floating=True, tag="TodoDock", verbose=verbose
+            self, floating=True, level="desktop", tag="TodoDock", verbose=verbose
         )
 
     def _on_app_state_changed(self, _state):
@@ -155,8 +160,8 @@ class TodoDock(QWidget):
     # ---------------- 构建 ----------------
     def _build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(_DOCK_MARGIN, 10, _DOCK_MARGIN, 10)
-        root.setSpacing(_DOCK_TITLE_GAP)   # 标题 ↔ 列表首项间距
+        root.setContentsMargins(_DOCK_MARGIN, _DOCK_VPAD, _DOCK_MARGIN, _DOCK_VPAD)
+        root.setSpacing(_DOCK_TITLE_GAP)   # 标题 ↔ 列表首项间距（= 列表项间距，见常量注释）
 
         self.title = QLabel("📋 " + tr("任务清单"))
         self.title.setObjectName("dockTitle")
@@ -182,7 +187,8 @@ class TodoDock(QWidget):
 
     @staticmethod
     def _qss():
-        return """
+        # 随全局 80% 等比缩放（挂件也是「页面」，内饰要与其它页面同尺度）
+        return scale_qss("""
         QLabel#dockTitle {
             font-size: 14px;
             font-weight: 700;
@@ -196,7 +202,7 @@ class TodoDock(QWidget):
             background: transparent;
             padding: 4px 0;
         }
-        """
+        """)
 
     def _place_top_left(self):
         """固定在屏幕左上角（避开任务栏），小留白。"""
@@ -204,7 +210,8 @@ class TodoDock(QWidget):
         if screen is None:
             return
         avail = screen.availableGeometry()
-        self.move(avail.left() + 8, avail.top() + 8)
+        pad = s(8)
+        self.move(avail.left() + pad, avail.top() + pad)
 
     # ---------------- 渲染 ----------------
     def refresh(self):
@@ -219,11 +226,10 @@ class TodoDock(QWidget):
                 w.setParent(None)
                 w.deleteLater()
         tasks = todo.all_tasks()
-        # 宽度自适应：有任务带提醒 → 对齐任务清单页宽度；取消提醒后没有一个任务
-        # 带提醒 → 恢复 336。宽度变化后必须立即重排，否则 _fit_height 会按旧宽度算高度。
-        target = _DOCK_WIDTH_WITH_REMIND if _any_remind(tasks) else _DOCK_WIDTH
-        if self.width() != target:
-            self.setFixedWidth(target)
+        # 宽度恒定：不再因为「存在带提醒时间的任务」而加宽挂件（2026-09-21 意见）。
+        # 提醒时间已改为标题 hover 提示，宽度与提示时间无关。
+        if self.width() != _DOCK_WIDTH:
+            self.setFixedWidth(_DOCK_WIDTH)
             lay = self.layout()
             if lay is not None:
                 lay.activate()
@@ -237,11 +243,15 @@ class TodoDock(QWidget):
                 # 挂件：禁用右键菜单、禁用点击标题开便签；勾选回调刷新自身并同步主窗口。
                 # open_sticky_on_click=True：点标题文字打开该任务的便签卡片
                 # （TaskRow 走 self.window().open_sticky(task) → 见本类 open_sticky）
+                # show_remind_tag=False：不常显提醒时间标签（会撑宽挂件），改挂标题 hover 提示
                 self.list_lay.addWidget(
                     TaskRow(t, self._after_toggle, None, None, self.ctx.stop_alarm,
                             enable_context_menu=False, open_sticky_on_click=True,
-                            glass_tag=True)
+                            glass_tag=True, show_remind_tag=False)
                 )
+        # 末尾留伸缩项：让行保持自身高度，多余空间落在列表底部而不是被塞进行内
+        # （否则行被拉高、内容垂直居中 → 头部与首条任务之间凭空多出一段空白）
+        self.list_lay.addStretch(1)
         self._fit_height()
         # 兜底穿透方案的属性挂在「行控件」上，_render 重建行后必须重新补挂，
         # 否则刷新出来的行会吞掉鼠标事件（原生 hitTest 方案无此问题）。
@@ -273,12 +283,14 @@ class TodoDock(QWidget):
             self._render()
 
     def _fit_height(self):
-        """可视高度 = 标题 + **最多 5 条任务**；超过 5 条则高度固定，其余靠滚动查看。
+        """可视高度 = 标题行 + **最多 5 条任务**；超过 5 条则高度固定，其余靠滚动查看。
 
-        不足 5 条时按实际内容收窄（挂件是透明窗口，多出来的空高度只会白白吃掉
-        空白处的点击穿透区域）；超过 5 条时按「前 5 行的实际高度和」定高，
-        QScrollArea 自动出现纵向滚动条，滚轮/拖滚动条都能翻。
-        屏幕太矮时再夹一道 max_h，避免把整屏占满。
+        2026-09-21 修正：原实现用 ``self.sizeHint().height() - inner`` 反推「非列表部分」
+        的高度，而 ``inner``（list_widget.sizeHint）与 sizeHint 的生效时机不一致时会算偏大，
+        于是滚动视口比「可见行高之和」更高；多出来的空间又被 QVBoxLayout 分给唯一一行
+        （行被拉高、内容垂直居中），最终表现为意见里那条「头部『任务清单』与任务列表的
+        间距太长」。现改为逐项显式计算 chrome，并配合 _render 末尾的伸缩项，行高恒定。
+        不足 5 条时按实际内容收窄；屏幕太矮时再夹一道 max_h，避免把整屏占满。
         """
         screen = QApplication.primaryScreen()
         avail_h = screen.availableGeometry().height() if screen is not None else 800
@@ -286,14 +298,13 @@ class TodoDock(QWidget):
 
         self.list_lay.activate()                       # 先让行布局生效，sizeHint 才准
         rows = self.list_widget.findChildren(TaskRow)
-        inner = self.list_widget.sizeHint().height()   # 全部行（或「暂无任务」）的高度
         if rows:
             heights = [r.sizeHint().height() for r in rows]
             visible = sum(heights[:_DOCK_VISIBLE_ROWS])
         else:
-            visible = inner                             # 空状态：一个「暂无任务」的高度
-        # 窗口非列表部分（上下内边距 + 标题 + 标题与列表间距 + 滚动区边框）
-        chrome = max(0, self.sizeHint().height() - inner)
+            visible = self.list_widget.sizeHint().height()   # 空状态：一个「暂无任务」的高度
+        # 窗口非列表部分：上下留白 + 标题 + 标题与列表的间距
+        chrome = (_DOCK_VPAD * 2 + self.title.sizeHint().height() + _DOCK_TITLE_GAP)
         self.setFixedHeight(min(chrome + visible, max_h))
 
     # ---------------- 交互区判定（跨平台共用）----------------

@@ -787,6 +787,13 @@ class VolumeIcon(QWidget):
 
 
 class IconButton(QPushButton):
+    """自绘图标按钮。
+
+    2026-09-21：按钮尺寸纳入全局 80% 等比缩放（原来 `setFixedSize(size, size)` 用的是
+    设计稿原始像素，缩放后其它内饰都小了一圈、只有这些按钮没变 → 播放器三个传输键
+    「整体都太大了」，见意见）。图标本体同步按同一比例缩放，保证按钮与图标同尺度。
+    """
+
     def __init__(self, kind, size=38):
         super().__init__()
         self.kind = kind
@@ -794,7 +801,10 @@ class IconButton(QPushButton):
             self.setObjectName("windowBtnClose" if kind == "close" else "windowBtn")
         else:
             self.setObjectName("playBtn" if kind == "play" else "toolBtn")
-        self.setFixedSize(size, size)
+        side = s(size)
+        self.setFixedSize(side, side)
+        # 图标缩放系数 = 缩放后边长 / 设计稿边长（用于把自绘图标等比缩小）
+        self._glyph_scale = side / float(size) if size else 1.0
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def paintEvent(self, e):  # noqa: N802
@@ -818,6 +828,12 @@ class IconButton(QPushButton):
         p.setPen(QPen(color, 1.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         p.setBrush(color)
         c = self.rect().center()
+        # 传输键（上一首 / 播放暂停 / 下一首）的图标随按钮一起等比缩放：绕中心缩放，
+        # 保证图标与按钮同尺度（否则按钮缩小后图标相对变大、压满整个圆）。
+        if self.kind in {"play", "pause", "prev", "next"} and abs(self._glyph_scale - 1.0) > 1e-6:
+            p.translate(c)
+            p.scale(self._glyph_scale, self._glyph_scale)
+            p.translate(-c)
         if self.kind == "play":
             p.drawPolygon(QPolygon([c + QPoint(-4, -10), c + QPoint(-4, 10), c + QPoint(11, 0)]))
         elif self.kind == "pause":
@@ -2256,6 +2272,8 @@ class PlayerWindow(QDialog):
         ctrl = QHBoxLayout()
         ctrl.setSpacing(s(18))
         ctrl.addStretch(1)
+        # 三个传输键整体缩小一档（意见：「音乐播放器的三个按钮整体都太大了，缩小一点」）
+        # 设计稿 38 / 50 / 38 → 经全局 80% 缩放为 30 / 40 / 30
         self.prev_b = IconButton("prev", 38)
         self.play_b = IconButton("play", 50)
         self.next_b = IconButton("next", 38)

@@ -13,12 +13,12 @@ from PyQt6.QtWidgets import (
     QGraphicsProxyWidget, QGraphicsRotation,
 )
 from PyQt6.QtCore import (
-    Qt, QDateTime, QTimer, QEvent, QSize, QRectF, QPropertyAnimation, QEasingCurve,
-    pyqtProperty,
+    Qt, QDateTime, QTimer, QEvent, QSize, QRectF, QPointF,
+    QPropertyAnimation, QEasingCurve, pyqtProperty,
 )
 from PyQt6.QtGui import (
-    QColor, QPainter, QPen, QBrush, QCursor, QIcon, QPainterPath, QVector3D, QPalette,
-    QLinearGradient,
+    QColor, QFontMetrics, QPainter, QPen, QBrush, QCursor, QIcon, QPainterPath,
+    QPolygonF, QVector3D, QPalette, QLinearGradient,
 )
 
 from app.core import todo, config
@@ -304,6 +304,7 @@ class ElideLabel(QLabel):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
         self._full = text or ""
+        self._extra_tip = ""     # 附加 hover 提示（如 TodoDock 的「提醒时间：年-月-日 时:分」）
         self._offset = 0.0
         self._hover = False
         self._done = False
@@ -334,7 +335,20 @@ class ElideLabel(QLabel):
     def setText(self, text):  # noqa: N802
         self._full = text or ""
         super().setText(self._full)
-        self.setToolTip(self._full or None)  # 悬停 tooltip 兜底：仍可看全（与滑动并存）
+        self._refresh_tooltip()
+
+    def set_extra_tip(self, text):
+        """附加 hover 提示：TodoDock 取消「提醒时间」常显后，改在标题文字下方 hover 显示。
+
+        形如「提醒时间：2026-09-21 02:07」，与标题全文一起拼进 tooltip（标题本身过长时
+        仍能看到完整文字，不丢信息）。
+        """
+        self._extra_tip = text or ""
+        self._refresh_tooltip()
+
+    def _refresh_tooltip(self):
+        parts = [p for p in (self._extra_tip, self._full) if p]
+        self.setToolTip("\n".join(parts) if parts else None)
 
     def set_done(self, done):
         self._done = bool(done)
@@ -550,33 +564,49 @@ class ToggleSwitch(QAbstractButton):
 
 
 class TodoCheckBox(QPushButton):
+    """任务复选框（自绘圆角方框 + 对勾）。
+
+    2026-09-21 按《修改意见》：复选框整体缩小一档（22 → 19，再经 80% 全局缩放 → 15px）。
+    同时把勾选几何从「写死的像素坐标」改为「按控件尺寸的等比分数」——原来的
+    (6,11)/(9,15)/(16,6) 是按 22px 画的，控件缩小后对勾会偏大偏外，现在任意尺寸都居中成比例。
+    """
+
+    # 设计尺寸（会经 s() 缩放到当前 UI_SCALE）；TodoDock 复用本类，样式自动一致
+    DESIGN_SIZE = 19
+
     def __init__(self):
         super().__init__()
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(s(22), s(22))
+        side = s(self.DESIGN_SIZE)
+        self.setFixedSize(side, side)
         self.setStyleSheet("QPushButton{background:transparent;border:none;padding:0;margin:0;}")
 
     def paintEvent(self, e):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = self.rect().adjusted(1, 1, -1, -1)
-        if self.isChecked():
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor("#ff7613")))
-            painter.drawRoundedRect(rect, 6, 6)
-        else:
-            pen = QPen(QColor(160, 142, 122, 76), 2)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        w, h = rect.width(), rect.height()
+        radius = w * 0.28
+        stroke = max(1.0, w * 0.10)
+        if not self.isChecked():
+            pen = QPen(QColor(160, 142, 122, 76), stroke)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(rect, 6, 6)
+            painter.drawRoundedRect(rect, radius, radius)
             return
-        pen = QPen(QColor("#ffffff"), 2)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor("#ff7613")))
+        painter.drawRoundedRect(rect, radius, radius)
+        # 对勾：三点等比（相对内框的分数与 22px 设计稿一致 → 25%/50%、40%/70%、75%/25%）
+        pen = QPen(QColor("#ffffff"), max(1.0, w * 0.10))
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
-        painter.drawLine(6, 11, 9, 15)
-        painter.drawLine(9, 15, 16, 6)
+        tick = [QPointF(rect.left() + w * 0.25, rect.top() + h * 0.50),
+                QPointF(rect.left() + w * 0.40, rect.top() + h * 0.70),
+                QPointF(rect.left() + w * 0.75, rect.top() + h * 0.25)]
+        painter.drawPolyline(QPolygonF(tick))
 
 
 class CalendarDateTimeEdit(QDateTimeEdit):
@@ -661,10 +691,15 @@ class ResizeGrip(QWidget):
 
 class TaskRow(QWidget):
     def __init__(self, task, on_toggle, on_edit=None, on_delete=None, on_interact=None,
-                 enable_context_menu=True, open_sticky_on_click=True, glass_tag=False):
+                 enable_context_menu=True, open_sticky_on_click=True, glass_tag=False,
+                 show_remind_tag=True):
         """glass_tag=True：优先级标签用「带颜色的半透明毛玻璃」底（桌面挂件 TodoDock 用）。
 
         列表页/便签页仍是实色卡片背景，标签保持实色更清晰 → 默认 False。
+
+        show_remind_tag=False（TodoDock 用）：不显示「提醒时间」标签 —— 该标签是
+        「年-月-日 时:分」的长串，会明显撑宽挂件；改为在任务标题上挂 hover 提示
+        「提醒时间：年-月-日 时:分」。
         """
         super().__init__()
         self.glass_tag = bool(glass_tag)
@@ -702,8 +737,11 @@ class TaskRow(QWidget):
         meta_lay = QHBoxLayout(self.meta)
         meta_lay.setContentsMargins(s(0), s(0), s(0), s(0))
         meta_lay.setSpacing(s(8))
-        if due_text:
+        if due_text and show_remind_tag:
             meta_lay.addWidget(self._make_tag(due_text, TAG_BG, TAG_FG))
+        if due_text and not show_remind_tag:
+            # TodoDock：取消「提醒时间」常显（长串会撑宽挂件）→ 改为标题 hover 提示
+            self.text.set_extra_tip(f"{tr('提醒时间')}：{due_text}")
         # 优先级标签文字跟随语言（低/中/高 → Low/Medium/High）；配色仍按原始中文键查表，
         # 数据库里的 priority 值保持「低/中/高」不改，避免破坏既有数据与逻辑。
         prio_bg, prio_fg = priority_tag_colors(prio)
@@ -802,7 +840,10 @@ class TodoWindow(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._list_size = LIST_WINDOW_SIZE
-        self._add_size = (352, 448)
+        # 添加/编辑页默认尺寸：352×606（2026-09-21 按意见附图 1:1 反推）。
+        # 原 352×448 装不下「任务标题 + 富文本工具栏(两行) + 提醒时间 + 优先级 + 底部按钮」，
+        # 表现为内容互相压盖（意见里「混杂显示不清」）。
+        self._add_size = (352, 606)
         # 最小尺寸 = 各模式默认尺寸（用户要求：只能从默认大小放大，不能缩小）
         # （列表页 440 宽 = 标题 + 四个按钮 + 边距，英文模式最宽，留足余量）
         self._list_min = self._list_size
@@ -1131,11 +1172,28 @@ class TodoWindow(QDialog):
         self.title_label.setText(title)
 
     def _apply_header_button_widths(self):
-        # 顶部四个按钮宽度统一（与「返回」一致），避免前三颗比「返回」宽出一截
-        is_en = config.settings.get("language") == "en"
-        w = 68 if is_en else 62
+        """顶部四个按钮宽度：在「任务清单」标题完整显示的前提下尽量收窄。
+
+        2026-09-21 需求：按钮宽度减小，让各语言下的标题（任务清单 / 任務清單 / Task List）
+        完整显示。原实现固定 62/68px，四个按钮 + 间距 + 页边距把 352px 窗口挤到标题只剩
+        ~46px → 「任务清单」被截断。这里按按钮实际字号（QSS 的 font-size 已随全局 80% 缩放）
+        量出最长标签所需宽度，中/繁/英三语都刚好够用，不再写死。
+        """
+        btn_font = self.sel_all.font()
+        btn_font.setPixelSize(s(12))          # 同 WINDOW_QSS 中 todoSecondary/todoPrimary 的 font-size
+        bfm = QFontMetrics(btn_font)
+        labels = (self.sel_all.text(), self.add_b.text(), self.del_b.text(), self.back_b.text())
+        need = max(bfm.horizontalAdvance(t) for t in labels) + 2 * s(13)
+        # 上限不超过原设计（62 / 英文 68 的缩放值）；下限保证点击热区
+        cap = s(68) if config.settings.get("language") == "en" else s(62)
+        w = max(s(48), min(cap, need))
         for b in (self.sel_all, self.add_b, self.del_b, self.back_b):
             b.setFixedWidth(w)
+        # 标题保底宽度：任何语言下「📋 任务清单」都完整可见（布局优先满足它）
+        title_font = self.title_label.font()
+        title_font.setPixelSize(s(15))        # 同 QLabel#window-title 的 font-size
+        tfm = QFontMetrics(title_font)
+        self.title_label.setMinimumWidth(tfm.horizontalAdvance(self.title_label.text()) + s(4))
 
     def _bar_press(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -1679,8 +1737,11 @@ class StickyNoteWindow(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                            | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # 最小 = 默认缩放尺寸（用户要求只能放大）；最小宽 400 可容纳单行工具栏，最小高 380 容纳编辑器 + 工具栏
-        self.setMinimumSize(320, 304)
+        # 最小 = 默认尺寸（用户要求只能放大）。默认高 320×280 让卡片底部刚好落在
+        # 「正文框下那一道横线」处：首屏看不到富文本工具栏，用户向下拉伸时才逐渐露出
+        # （2026-09-21 意见：原 304 高会把工具栏顶出一截、显示不完全）。
+        # 真实默认/最小尺寸仍以 screen_fit.WINDOW_DEFAULTS["sticky"] 为准（下方 fit_window 覆盖）。
+        self.setMinimumSize(320, 280)
         self.setMaximumSize(1100, 900)
 
         self._build_note()

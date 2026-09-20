@@ -43,6 +43,11 @@ IS_MAC = sys.platform == "darwin"
 # ---------------- NSWindowLevel ----------------
 LEVEL_NORMAL = 0
 LEVEL_FLOATING = 3
+# 桌面层（kCGDesktopIconWindowLevel = kCGDesktopWindowLevel + 1，即 INT32_MIN + 26）：
+# 位于壁纸之上、桌面图标同一层，**在所有 App 普通窗口之下**。桌面挂件用它实现
+# 「与桌面融为一体、不遮挡其它应用界面」——别的软件一出现就自然盖住它。
+# 不用更低的 kCGDesktopWindowLevel（壁纸那一层）是为了避免被壁纸本身盖住而看不见。
+LEVEL_DESKTOP = -2147483622
 
 # ---------------- NSWindowCollectionBehavior ----------------
 BEHAVIOR_CAN_JOIN_ALL_SPACES = 1 << 0
@@ -231,7 +236,7 @@ def ns_window_pointer(widget):
 _LOGGED_FAIL = set()   # 同一 tag 的失败只记一次，避免定时重申刷爆日志
 
 
-def apply_stage_exempt(widget, floating=None, tag="app-window", verbose=False):
+def apply_stage_exempt(widget, floating=None, tag="app-window", verbose=False, level=None):
     """macOS：让窗口不被「台前调度 / Mission Control / 空间切换」收走或重排。
 
     这是**整个软件**层面的豁免，卡片窗口（待办/闹钟/计时/设置/播放器/场景）与
@@ -246,6 +251,9 @@ def apply_stage_exempt(widget, floating=None, tag="app-window", verbose=False):
       (IgnoresCycle)。
     - ``floating``：None = **不动层级**（保留现有置顶/让路逻辑，卡片窗口用这个）；
       True/False = 同时锁定浮层/普通层级（桌面挂件用 True）。
+    - ``level``：显式层级覆盖，支持 ``"desktop"``（→ LEVEL_DESKTOP，桌面层）。
+      桌面挂件（TodoDock）用它把自己压到所有 App 窗口之下，做到「不遮挡其它应用」。
+      与 ``floating`` 同时给出时以 ``level`` 为准。
 
     幂等，可随定时/状态变化反复重申。返回 True 表示已生效（回读校验）。
     """
@@ -261,23 +269,31 @@ def apply_stage_exempt(widget, floating=None, tag="app-window", verbose=False):
             return False
         win = int(win)
 
+        want_desktop = (level == "desktop")
         _send_void_bool(win, "setHidesOnDeactivate:", False)
-        if floating is not None:
+        if want_desktop:
+            _send_void_long(win, "setLevel:", LEVEL_DESKTOP)
+        elif floating is not None:
             _send_void_long(win, "setLevel:", LEVEL_FLOATING if floating else LEVEL_NORMAL)
         _send_void_uint(win, "setCollectionBehavior:", DESKTOP_WIDGET_BEHAVIOR)
 
-        level = _send_long(win, "level")
+        cur_level = _send_long(win, "level")
         behavior = _send_uint(win, "collectionBehavior")
-        if (behavior & DESKTOP_WIDGET_BEHAVIOR) == DESKTOP_WIDGET_BEHAVIOR and (
-                floating is not True or level >= LEVEL_FLOATING):
+        if want_desktop:
+            level_ok = (cur_level == LEVEL_DESKTOP)
+        elif floating is True:
+            level_ok = cur_level >= LEVEL_FLOATING
+        else:
+            level_ok = True
+        if (behavior & DESKTOP_WIDGET_BEHAVIOR) == DESKTOP_WIDGET_BEHAVIOR and level_ok:
             if verbose:
                 mac_log(
-                    f"{tag}: NSWindow={win} view={view} level={level} "
+                    f"{tag}: NSWindow={win} view={view} level={cur_level} "
                     f"behavior=0x{behavior:x} ✅（台前调度豁免已生效）",
                     tag="mac",
                 )
             return True
-        _fail_log(tag, f"原生设置未完全生效 level={level} behavior=0x{behavior:x}")
+        _fail_log(tag, f"原生设置未完全生效 level={cur_level} behavior=0x{behavior:x}")
         return False
     except Exception as exc:  # noqa: BLE001
         _fail_log(tag, f"原生窗口设置异常 {exc!r}")
@@ -292,12 +308,13 @@ def _fail_log(tag, message):
     mac_log(f"{tag}: {message}", tag="mac-error")
 
 
-def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verbose=False):
+def apply_desktop_widget_style(widget, floating=True, tag="desktop-widget", verbose=False,
+                               level=None):
     """把窗口登记为「桌面挂件」：台前调度/调度中心/空间切换都动不了它。
 
-    = apply_stage_exempt(...) + 锁定浮层层级（floating=True 时）。
+    = apply_stage_exempt(...) + 锁定层级（floating=True → 浮层；level="desktop" → 桌面层）。
     """
-    return apply_stage_exempt(widget, floating=floating, tag=tag, verbose=verbose)
+    return apply_stage_exempt(widget, floating=floating, tag=tag, verbose=verbose, level=level)
 
 
 # ---------------------------------------------------------------------------

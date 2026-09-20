@@ -9,7 +9,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QGraphicsDropShadowEffect,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
-    QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from app.core import alarm as alarm_mod, assets, config
@@ -18,6 +18,9 @@ from app.core.voice import say
 from app.ui.common import PeekCard, NoticeDialog
 from app.ui.screen_fit import fit_window, scale_qss, s
 from app.ui.context_menu import ActionPopupMenu
+# 长文本省略标签：自定义播报内容可能是整句，必须省略，否则把右侧开关挤出可视区。
+# todo_window 不 import 本模块，无循环依赖风险。
+from app.ui.todo_window import ElideLabel
 
 
 def _alarm_menu_icon(kind):
@@ -210,12 +213,18 @@ class Switch(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        # 轨道 = 整个控件，圆角 = 高度的一半；滑块直径/内边距按高度取分数。
+        # ★ 原来的 radius=12、滑块 18×18、knob_x = width-21 是按设计稿 44×24 写死的，
+        #   全局 80% 缩放后控件只有 35×19：滑块(18) 比轨道还高、又超出右边界 →
+        #   表现为「白色方块溢出轨道」的渲染异常（意见：开关渲染异常 / 滑动开关渲染有问题）。
+        w, h = float(self.width()), float(self.height())
         painter.setBrush(QColor("#f97510") if self._on else QColor(232, 225, 218))
-        painter.drawRoundedRect(QRectF(self.rect()), 12, 12)
-        knob_x = self.width() - 21 if self._on else 3
-        knob = QRectF(knob_x, 3, 18, 18)
+        painter.drawRoundedRect(QRectF(0.0, 0.0, w, h), h / 2.0, h / 2.0)
+        pad = max(1.0, h * 0.125)          # 设计稿 3 / 24
+        d = h - 2 * pad                    # 设计稿 18 / 24
+        x = (w - pad - d) if self._on else pad
         painter.setBrush(QColor("#ffffff"))
-        painter.drawEllipse(knob)
+        painter.drawEllipse(QRectF(x, pad, d, d))
 
     def mouseReleaseEvent(self, e):  # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
@@ -249,10 +258,17 @@ class AlarmRow(QWidget):
         info = QVBoxLayout(info_w)
         info.setContentsMargins(s(0), s(0), s(0), s(0))
         info.setSpacing(s(2))
-        rep = QLabel(self._repeat_text())
+        # ★ 两行都用 ElideLabel（todo_window 的省略标签）：
+        #   自定义语音播报是用户随手输入的整句，之前用普通 QLabel 会把 info 列撑到超宽，
+        #   把右侧开关挤出可视区（意见红字项：「自定义播报内容没有做长文本显示省略处理，
+        #   导致开关显示溢出（显示不了）」）。ElideLabel 宽度不足时右侧省略号，且自带
+        #   hover tooltip 可看全文。文字颜色/字号与 ALARM_QSS 同值，直接内联（同 TaskRow 的做法）。
+        rep = ElideLabel(self._repeat_text())
         rep.setObjectName("alarmRepeat")
-        ring = QLabel(self._ring_text())
+        rep.setStyleSheet(scale_qss("color:#6b5744;font-size:12px;font-weight:500;"))
+        ring = ElideLabel(self._ring_text())
         ring.setObjectName("alarmRing")
+        ring.setStyleSheet(scale_qss("color:#a08e7a;font-size:11px;font-weight:500;"))
         info.addWidget(rep)
         info.addWidget(ring)
         lay.addWidget(info_w, 1)
@@ -319,7 +335,12 @@ class AlarmWindow(QDialog):
         # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
         # （最小尺寸 = 各自默认尺寸，见 _show_* 内的 setMinimumSize）
         self._list_size = (304, 336)
+        # 添加/编辑页默认 320×432（意见：默认尺寸继续保持）。
+        # 仅当「重复」选到「仅一次 / 自定义」时，下方要多出一行（日期选择器 / 星期勾选），
+        # 框体高度直接抬到 _add_size_expanded（320×490，按意见附图 1:1 刻算）以显示完整。
         self._add_size = (320, 432)
+        self._add_size_expanded = (320, 490)
+        self._repeat_needs_extra = False
         fit_window(self, "alarm_list", resizable=True)
         self._build()
 
@@ -443,8 +464,11 @@ class AlarmWindow(QDialog):
         self.repeat_combo.currentIndexChanged.connect(self._on_repeat)
         body_l.addWidget(self.repeat_combo)
 
+        # 重复子项（日期 / 星期）。高度 = 控件高 s(46) + 与上方下拉框的间距 s(8)：
+        # 间距收进子页顶部内边距里，这样「隐藏 repeat_extra」时不会残留一段空白
+        # （原来间距是独立的 addSpacing(s(8))，加上永远占位的空页 → 意见里的『留白太多』）。
         self.repeat_extra = QStackedWidget()
-        self.repeat_extra.setFixedHeight(s(46))
+        self.repeat_extra.setFixedHeight(s(46) + s(8))
 
         empty_once_space = QWidget()
         empty_once_space.setObjectName("alarmBody")
@@ -452,7 +476,7 @@ class AlarmWindow(QDialog):
         once_page = QWidget()
         once_page.setObjectName("alarmBody")
         once_l = QVBoxLayout(once_page)
-        once_l.setContentsMargins(s(0), s(0), s(0), s(0))
+        once_l.setContentsMargins(s(0), s(8), s(0), s(0))
         self.once_date = QDateEdit(QDate.currentDate())
         self.once_date.setObjectName("fieldInput")
         self.once_date.setDisplayFormat("yyyy/MM/dd")
@@ -467,7 +491,7 @@ class AlarmWindow(QDialog):
         self.days_w.setObjectName("alarmDays")
         self.days_w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         days_l = QHBoxLayout(self.days_w)
-        days_l.setContentsMargins(s(0), s(0), s(0), s(0))
+        days_l.setContentsMargins(s(0), s(8), s(0), s(0))
         days_l.setSpacing(s(6))
         self.day_btns = []
         for label in ["一", "二", "三", "四", "五", "六", "日"]:
@@ -479,7 +503,6 @@ class AlarmWindow(QDialog):
         self.repeat_extra.addWidget(once_page)
         self.repeat_extra.addWidget(empty_weekday_space)
         self.repeat_extra.addWidget(self.days_w)
-        body_l.addSpacing(s(8))
         body_l.addWidget(self.repeat_extra)
         body_l.addSpacing(s(16))
 
@@ -493,9 +516,15 @@ class AlarmWindow(QDialog):
         body_l.addWidget(self.ring_search)
         body_l.addSpacing(s(10))
 
+        # 歌曲列表：改为「最小高度 + 可伸展」而不是写死 s(108)。
+        # 原来固定 86px，而窗口只有 432 高 → 其余内容把它挤到可视区之外，出现
+        # 「歌曲项压在『自定义语音播报』标签上」的重叠（意见：重复的下拉列表渲染异常）。
+        # 现在多余空间由本列表吸收，任何窗口高度下都不会溢出、也不会留大片空白。
         self.ring_list = QListWidget()
         self.ring_list.setObjectName("ringList")
-        self.ring_list.setFixedHeight(s(108))
+        self.ring_list.setMinimumHeight(s(70))
+        self.ring_list.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                     QSizePolicy.Policy.Expanding)
         self.ring_list.itemClicked.connect(self._pick_ring)
         body_l.addWidget(self.ring_list)
         body_l.addSpacing(s(16))
@@ -507,7 +536,8 @@ class AlarmWindow(QDialog):
         self.custom_text.setPlaceholderText(tr('例如："该起床啦"'))
         self.custom_text.setFixedHeight(s(46))
         body_l.addWidget(self.custom_text)
-        body_l.addStretch(1)
+        # 去掉原先的 addStretch(1)：让 ring_list 吸收多余空间（底部按钮始终贴底），
+        # 而不是把空间塞在输入框与按钮之间造成视觉空洞。
         body_l.addSpacing(s(12))
 
         footer = QHBoxLayout()
@@ -533,6 +563,9 @@ class AlarmWindow(QDialog):
         root.addWidget(body, 1)
         self.stack.addWidget(page)
         self._filter_ring("")
+        # ★ 初始化重复子项：setCurrentIndex 发生在 connect 之前，_on_repeat 不会被触发，
+        #   必须显式跑一次 —— 否则「每天/工作日」下 repeat_extra 仍占位（留白）。
+        self._on_repeat(self.repeat_combo.currentIndex())
 
     def _field_label(self, text):
         label = QLabel(tr(text))
@@ -578,8 +611,32 @@ class AlarmWindow(QDialog):
         edit.setText(f"{value:02d}")
 
     def _on_repeat(self, idx):
+        """重复选项变化：切换子项页，并同步「每项均匀间距 + 显示完整」。
+
+        page_map：0=仅一次→日期页，1=每天→空页，2=工作日→空页，3=自定义→星期页。
+        - 空页时把 repeat_extra **整个隐藏**：以前它永远占着 s(46)+s(8) 的高度，
+          「重复」与「铃声」之间就凭空多出一块留白（意见红字项）。
+        - 需要额外一行（仅一次 / 自定义）时把窗口高度抬到 _add_size_expanded，
+          保证内容完整显示（意见：直接增大框体高度到指定）。
+        """
+        needs_extra = idx in (0, 3)
         page_map = {0: 1, 1: 0, 2: 2, 3: 3}
+        self._repeat_needs_extra = needs_extra
         self.repeat_extra.setCurrentIndex(page_map.get(idx, 0))
+        self.repeat_extra.setVisible(needs_extra)
+        if self.stack.currentIndex() == 1:
+            self._apply_add_size()
+
+    def _apply_add_size(self, force=False):
+        """按当前重复选项决定添加/编辑页窗口高度（仅一次/自定义需要多一行 → 更高）。
+
+        宽度只在小于默认宽时才补到默认宽（用户手动拉宽的结果保留）。
+        force=True 用于 _show_add / _show_edit：此时要无条件按当前表单状态定尺寸。
+        """
+        size = self._add_size_expanded if self._repeat_needs_extra else self._add_size
+        self.setMinimumSize(*size)
+        if force or self.height() != size[1]:
+            self.resize(max(size[0], self.width()), size[1])
 
     def _filter_ring(self, text):
         self.ring_list.clear()
@@ -643,18 +700,18 @@ class AlarmWindow(QDialog):
         self._form_title.setText(tr("添加闹钟"))
         self.delete_b.hide()
         self._reset_form()
-        self.setMinimumSize(*self._add_size)   # 最小 = 添加页默认尺寸
-        self.resize(*self._add_size)
         self.stack.setCurrentIndex(1)
+        # 最小 = 添加页默认尺寸（按当前重复选项可能抬到 _add_size_expanded）
+        self._apply_add_size(force=True)
 
     def _show_edit(self, alarm):
         self._editing_alarm = dict(alarm)
         self._populate_form(self._editing_alarm)
         self._form_title.setText(tr("编辑闹钟"))
         self.delete_b.show()
-        self.setMinimumSize(*self._add_size)   # 最小 = 编辑页默认尺寸
-        self.resize(*self._add_size)
         self.stack.setCurrentIndex(1)
+        # 最小 = 编辑页默认尺寸（按该闹钟的重复选项可能抬到 _add_size_expanded）
+        self._apply_add_size(force=True)
 
     def _show_list(self):
         self._editing_alarm = None

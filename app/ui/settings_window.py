@@ -333,11 +333,17 @@ class Switch(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        # 同 alarm_window.Switch：轨道/滑块全部按控件实际尺寸取比例。
+        # 原写死的 radius=12、滑块 18×18、knob_x=width-21 是按 44×24 设计稿画的，
+        # 全局 80% 缩放后控件只剩 35×19 → 滑块比轨道高且越出右边界，渲染异常。
+        w, h = float(self.width()), float(self.height())
         painter.setBrush(QColor("#f97510") if self._on else QColor(232, 225, 218))
-        painter.drawRoundedRect(QRectF(self.rect()), 12, 12)
-        knob_x = self.width() - 21 if self._on else 3
+        painter.drawRoundedRect(QRectF(0.0, 0.0, w, h), h / 2.0, h / 2.0)
+        pad = max(1.0, h * 0.125)          # 设计稿 3 / 24
+        d = h - 2 * pad                    # 设计稿 18 / 24
+        x = (w - pad - d) if self._on else pad
         painter.setBrush(QColor("#ffffff"))
-        painter.drawEllipse(QRectF(knob_x, 3, 18, 18))
+        painter.drawEllipse(QRectF(x, pad, d, d))
 
 
 class SettingsWindow(QDialog):
