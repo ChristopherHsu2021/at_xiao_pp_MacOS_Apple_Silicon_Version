@@ -43,6 +43,21 @@ IS_MAC = sys.platform == "darwin"
 # ---------------- NSWindowLevel ----------------
 LEVEL_NORMAL = 0
 LEVEL_FLOATING = 3
+# 「置顶（锁定）」层（= NSModalPanelWindowLevel = 8，2026-09-21 新增）：
+# 便签按「置顶」按钮锁定后必须「显示优先级最高且不被其它页面或应用遮挡」。
+# 选 8 而不是更高的 NSFloatingWindowLevel(3)/NSStatusWindowLevel(25) 的理由：
+#   - > 3：压得住**其它 App 的浮动窗口**（NSFloatingWindowLevel=3，如各类常驻置顶工具），
+#     这是「不被其它应用遮挡」的实际下限；普通窗口(0)早已不是问题；
+#   - < 24（NSMainMenuWindowLevel）/25（NSStatusWindowLevel）：即使把便签拖到屏幕最上方，
+#     也不会盖住 macOS 菜单栏与状态栏（否则用户点不到苹果菜单，属"妨碍用户"）；
+#   - < 101（NSPopUpMenuWindowLevel）：本程序自己的下拉/菜单弹层仍在它之上。
+LEVEL_PINNED = 8
+# 弹层/模态框专用层（= NSPopUpMenuWindowLevel = 101，2026-09-21 新增）：
+# 便签置顶锁定后自己在 LEVEL_PINNED(8)，本程序的下拉列表 / 右键菜单 / 模态提示框
+# 默认只停在 NSFloatingWindowLevel(3) → 会被置顶便签盖住（菜单点不到、提示框关不掉）。
+# 因此弹层显示后必须显式提到这一层：它高于 LEVEL_PINNED，也高于菜单栏(24/25)，
+# 正是 AppKit 给「弹出菜单」预留的层级。
+LEVEL_ABOVE_PINNED = 101
 # 桌面层（kCGDesktopIconWindowLevel = kCGDesktopWindowLevel + 1，即 INT32_MIN + 26）。
 # ⚠️ 实测不可用（2026-09-21，TodoDock 上验证过，勿再启用）：
 #   窗口一旦降到这一层，内容会被系统合成成「半透明发虚」的样子，并且被 Finder 的
@@ -364,6 +379,74 @@ def order_window_back(widget, tag="order-back"):
         return False
 
 
+# 层级名 → AppKit 数值。供 common.keep_on_top / release_topmost 传名字调用，
+# 避免调用方各自硬编码数字（历史上 common 用 PyObjC 单独实现过一份，见 apply_level 注释）。
+LEVEL_NAMES = {
+    "normal": LEVEL_NORMAL,
+    "floating": LEVEL_FLOATING,
+    "pinned": LEVEL_PINNED,
+    "above_pinned": LEVEL_ABOVE_PINNED,
+}
+
+
+def apply_level(widget, level, tag="level", order_back=False):
+    """把窗口的 NSWindow level 设为指定层（``level`` 可为 LEVEL_* 数值或 LEVEL_NAMES 键名）。
+
+    ★ 2026-09-21 统一入口：此前 common.py 用 **PyObjC**（``objc`` / ``AppKit``）单独实现了
+    一遍同功能，而本模块刻意全走 ctypes + libobjc —— 理由见模块 docstring：PyObjC 在冻结包
+    里若 AppKit 桥接缺失会**静默失效**，那样「切到别的 App 就让路」在 macOS 上根本不会发生。
+    现在层级变更只有这一条实现，置顶便签（LEVEL_PINNED）、弹层提权（LEVEL_ABOVE_PINNED）、
+    卡片浮层/让路（LEVEL_FLOATING / LEVEL_NORMAL）全部复用。
+
+    ``order_back=True`` 时同时 ``orderBack:``（同层内压到最后，跨 App 生效）——
+    语义细节见 ``order_window_back``。失败只记日志、返回 False，不影响主流程。
+    """
+    if not IS_MAC:
+        return False
+    try:
+        target = LEVEL_NAMES.get(level, level) if isinstance(level, str) else int(level)
+        view = int(widget.winId())
+        if not view:
+            return False
+        win = _send_ptr(view, "window")
+        if not win:
+            _fail_log(tag, f"取不到 NSWindow（view={view}）")
+            return False
+        win = int(win)
+        if _send_long(win, "level") != target:
+            _send_void_long(win, "setLevel:", target)
+        ok = _send_long(win, "level") == target
+        if ok and order_back:
+            _send_void_ptr(win, "orderBack:", 0)
+        if not ok:
+            _fail_log(tag, f"setLevel 未生效（target={target}）")
+        return ok
+    except Exception as exc:  # noqa: BLE001
+        mac_log(f"{tag}: apply_level 异常 {exc!r}", tag="mac-error")
+        return False
+
+
+def raise_above_pinned(widget, tag="above-pinned"):
+    """把弹层 / 模态框抬到 LEVEL_ABOVE_PINNED（高于置顶便签 LEVEL_PINNED）。
+
+    便签「置顶（锁定）」后自身在 LEVEL_PINNED(8)，而本程序的自绘弹层
+    （下拉列表 / 右键菜单 / 日历）与模态提示框默认停在 NSFloatingWindowLevel(3) 或
+    普通层(0) —— 会被置顶便签整个盖住（表现为：菜单看不见、点不到，提示框关不掉）。
+    因此这些窗口**显示之后**必须显式提权一次。幂等，可重复调用。
+    """
+    if not IS_MAC:
+        return False
+    ok = apply_level(widget, LEVEL_ABOVE_PINNED, tag=tag)
+    if ok:
+        try:
+            win = int(_send_ptr(int(widget.winId()), "window"))
+            if win:
+                _send_void_ptr(win, "orderFront:", 0)   # 提到该层最前
+        except Exception:  # noqa: BLE001
+            pass
+    return ok
+
+
 def set_window_level(widget, floating, tag="level"):
     """轻量层级切换：浮层(NSFloatingWindowLevel) / 普通层(NSNormalWindowLevel)。
 
@@ -385,31 +468,8 @@ def set_window_level(widget, floating, tag="level"):
 
     幂等；返回 True 表示已处于目标层级。非 darwin 直接返回 False。
     """
-    if not IS_MAC:
-        return False
-    try:
-        view = int(widget.winId())
-        if not view:
-            return False
-        win = _send_ptr(view, "window")
-        if not win:
-            return False
-        win = int(win)
-        target = LEVEL_FLOATING if floating else LEVEL_NORMAL
-        if _send_long(win, "level") == target:
-            if not floating:
-                _send_void_ptr(win, "orderBack:", 0)   # 已在普通层：确保同时在最靠后
-            return True
-        _send_void_long(win, "setLevel:", target)
-        if _send_long(win, "level") == target:
-            if not floating:
-                _send_void_ptr(win, "orderBack:", 0)
-            return True
-        _fail_log(tag, f"setLevel 未生效（target={target}）")
-        return False
-    except Exception as exc:  # noqa: BLE001
-        mac_log(f"{tag}: set_window_level 异常 {exc!r}", tag="mac-error")
-        return False
+    return apply_level(widget, LEVEL_FLOATING if floating else LEVEL_NORMAL,
+                       tag=tag, order_back=not floating)
 
 
 def iter_exempt_candidates():
@@ -495,6 +555,46 @@ def make_resizable(widget, tag="resizable"):
         return False
     except Exception as exc:  # noqa: BLE001
         mac_log(f"{tag}: make_resizable 异常 {exc!r}", tag="mac-error")
+        return False
+
+
+def set_resizable(widget, enabled, tag="resizable"):
+    """macOS：动态开关无边框窗口的**原生**边缘缩放（styleMask 的 NSResizableWindowMask 位）。
+
+    ★ 2026-09-21 便签「置顶（锁定）」需要（用户要求：锁定后**不能调整窗口大小**）：
+    ``ResizeGrip`` 只能挡住 Qt 自绘的那 5 个握把，挡不住 macOS 原生 styleMask 提供的
+    边缘缩放 —— 锁定状态下把鼠标移到便签边框上仍会出现缩放光标、仍能拖大窗口。
+    真正让窗口「不可缩放」必须把原生 resizable 位摘掉。
+
+    ``enabled=True`` 时等价于 ``make_resizable``（幂等）；``False`` 时摘位。
+    非 darwin 直接返回 False（Windows/Linux 只有自绘握把，由 ResizeGrip 自己挡）。
+    """
+    if not IS_MAC:
+        return False
+    try:
+        view = int(widget.winId())
+        if not view:
+            return False
+        win = _send_ptr(view, "window")
+        if not win:
+            _fail_log(tag, f"取不到 NSWindow（view={view}）")
+            return False
+        win = int(win)
+        cur = _send_uint(win, "styleMask")
+        want = cur | NS_WINDOW_STYLE_MASK_RESIZABLE if enabled \
+            else cur & ~NS_WINDOW_STYLE_MASK_RESIZABLE
+        if want == cur:
+            return True
+        _send_void_uint(win, "setStyleMask:", want)
+        after = _send_uint(win, "styleMask")
+        if bool(after & NS_WINDOW_STYLE_MASK_RESIZABLE) == bool(enabled):
+            mac_log(f"{tag}: NSWindow={win} styleMask=0x{after:x} resizable={bool(enabled)} ✅",
+                    tag="mac")
+            return True
+        _fail_log(tag, f"set_resizable({enabled}) 未生效（before=0x{cur:x} after=0x{after:x}）")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        mac_log(f"{tag}: set_resizable 异常 {exc!r}", tag="mac-error")
         return False
 
 

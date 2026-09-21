@@ -713,7 +713,18 @@ class RichEditor(QWidget):
         self.editor.setPlaceholderText(
             tr("在这里编辑任务详情") if self._compact
             else tr("在这里填写任务详情，可用上方工具栏排版…（可选）"))
-        self.editor.setMinimumHeight(180 if self._compact else 96)
+        # ★ 2026-09-21 修「便签默认尺寸下看不到富文本工具栏」（用户意见附图实证）：
+        #   紧凑模式（便签卡片）原来给正文一个 180px 的**硬最小高**，而便签的默认尺寸
+        #   与最小尺寸是同一个值 320×280（screen_fit.WINDOW_DEFAULTS["sticky"]）。
+        #   卡片内的竖向需求 = 上边距 16 + 顶部栏 19 + 间距 10 + 标题 29 + 间距 13
+        #                    + 正文(≥180) + 间距 16 + 工具栏(窄宽度换行成 2 行 ≈72) + 下边距 16
+        #                    = 371px > 280px → QVBoxLayout 无法压缩正文（已到最小高），
+        #   整体溢出窗口，底部被裁掉——正好裁在工具栏上：用户看到第一行按钮，换行后的
+        #   第二行（高亮/清除格式）只剩半个，且必须把窗口往下拉大才慢慢露出来。
+        #   把紧凑模式正文最小高改成 56 设计像素（≈45px）后总需求降到 236px < 280px，
+        #   默认尺寸即可完整显示工具栏；窗口被拉大时正文区仍靠 stretch 自动长高。
+        #   完整模式（添加/编辑任务页）窗口高 606，180 不成问题，保持原值。
+        self.editor.setMinimumHeight(s(56) if self._compact else 96)
         self.editor.currentCharFormatChanged.connect(self._sync_active)
         self.editor.cursorPositionChanged.connect(self._sync_active)
         self.editor.installEventFilter(self)

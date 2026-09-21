@@ -12,6 +12,13 @@
      同构：窗口根布局 → 不透明实底 QWidget(self.note) → 普通子控件层级。
   D2) 行为验证：合成鼠标事件证明「按下 + 移动」真的让窗口跟随；卡片像素 alpha=255
      且为底色 #fffaf5（不透明）；置顶（锁定）时拖拽被拒。
+  E) 默认尺寸（320×280）下富文本工具栏**完整可见**（含窄宽度换行后的第二行）——
+     用户意见附图的核心诉求：此前紧凑编辑器 180px 硬最小高使卡片竖向需求 371px > 280px，
+     布局溢出把底部工具栏裁掉，只有把窗口往下拉大才慢慢露出来。
+  F) 置顶按钮语义（用户定义）：点一下选定 —— 不能移动、不能调整大小（隐藏握把 +
+     摘掉 macOS 原生 resizable 位）、加橙色描边；再点一下取消，恢复可拖可缩。
+  G) 层级/让路接线（源码级）：置顶便签「只抬不降」（LEVEL_PINNED / release_topmost 跳过 /
+     main 每拍最后抬层 / 点击别的页面也会被压回），未锁定便签随其它卡片一起让路。
 """
 import os
 import sys
@@ -53,6 +60,7 @@ check(int(old.windowType()) & 0xFF == int(Qt.WindowType.Window),
 
 print("[B] 便签基类为 QDialog（对齐 TodoWindow，类型即 Dialog）")
 import app.ui.todo_window as tw
+from app.ui.screen_fit import s as s_local
 check(issubclass(tw.StickyNoteWindow, QDialog),
       "StickyNoteWindow 应继承自 QDialog")
 src = open(tw.__file__, encoding="utf-8").read()
@@ -149,13 +157,108 @@ w._drag_release(_mev(QEvent.Type.MouseButtonRelease, (60, 40), (260, 240)))
 check(w._drag_pos is None, "释放后清空拖拽状态")
 
 # 4) 置顶（锁定）后不得再被拖动
-w._locked = True
+w.set_pinned(True)
 _before = w.pos()
 w._drag_press(_mev(QEvent.Type.MouseButtonPress, (10, 10), (210, 210)))
 check(w._drag_pos is None, "锁定状态下按下不进入拖拽（_drag_pos 保持 None）")
 w._drag_move(_mev(QEvent.Type.MouseMove, (80, 60), (280, 260)))
 check(w.pos() == _before, f"锁定状态下移动窗口位置不变（实得 {w.pos()}）")
-w._locked = False
+w.set_pinned(False)
+
+print("[E] 默认尺寸下富文本工具栏必须完整可见（用户意见附图的核心诉求）")
+w.resize(320, 280)
+app.processEvents()
+for _ in range(4):
+    app.processEvents()
+_tb = w.editor.toolbar
+_tb_bottom = _tb.mapTo(w, _tb.rect().bottomLeft()).y()
+check(_tb.isVisible(), "富文本工具栏可见")
+check(_tb_bottom < w.height(),
+      f"工具栏底边必须落在窗口内（底边 {_tb_bottom} < 窗高 {w.height()}）")
+check(w.editor.editor.height() >= s_local(40),
+      f"正文区仍有可用高度（实得 {w.editor.editor.height()}px）")
+_clipped = []
+for _key, _b in w.editor._cmd_buttons.items():
+    _p = _b.mapTo(w, _b.rect().bottomLeft())
+    if _p.y() >= w.height():
+        _clipped.append(_key)
+for _b in (w.editor.fore_btn, w.editor.hili_btn):
+    _p = _b.mapTo(w, _b.rect().bottomLeft())
+    if _p.y() >= w.height():
+        _clipped.append("color")
+check(not _clipped,
+      f"工具栏 11 个按钮（含换行后的第二行）全部在窗口内（被裁：{_clipped}）")
+check(w.layout().minimumSize().height() <= w.height(),
+      f"卡片布局最小需求高度不超过默认窗高（需求 {w.layout().minimumSize().height()}"
+      f" <= {w.height()}）—— 溢出正是原先「工具栏被裁掉、下拉拉大才露出」的根因")
+
+print("[F] 置顶按钮 = 选定/取消选定（不可移动、不可缩放、层级最高）")
+check(not w._pinned_top and not w._locked, "初始未锁定")
+check(w.btn_pin.toolTip() not in ("", "取消置顶", "Unpin"),
+      f"未锁定时提示语为「置顶」（实得 {w.btn_pin.toolTip()!r}）")
+w.toggle_pin()
+app.processEvents()
+check(w._pinned_top is True, "点击置顶 → 进入选定态（_pinned_top=True）")
+check(w._locked is True, "_locked 为 _pinned_top 的只读别名（ResizeGrip 依赖它）")
+check(w.btn_pin.toolTip() in ("取消置顶", "Unpin"),
+      f"锁定后提示语变为「取消置顶」（实得 {w.btn_pin.toolTip()!r}）")
+check(all(not g.isVisible() for g in w._grips),
+      "锁定后 5 个边缘握把全部隐藏（否则边缘仍是缩放光标）")
+check(w.lock_frame.isVisible() and w.lock_frame.geometry() == w.rect(),
+      "锁定后卡片描边层可见且铺满窗口（「已选定」的视觉反馈）")
+_img = w.grab().toImage()
+_corner = _img.pixelColor(2, 2)
+check(_corner.name().lower() == "#f9730f" and _corner.alpha() == 255,
+      f"描边像素为主题橙 #f9730f 且不透明（实得 {_corner.name()} alpha={_corner.alpha()}）")
+_before = w.pos()
+w._drag_press(_mev(QEvent.Type.MouseButtonPress, (10, 10), (210, 210)))
+w._drag_move(_mev(QEvent.Type.MouseMove, (90, 70), (290, 270)))
+check(w._drag_pos is None and w.pos() == _before, "锁定后彻底不可移动")
+w.toggle_pin()
+app.processEvents()
+check(w._pinned_top is False, "再点一次置顶 → 取消选定")
+check(all(g.isVisible() for g in w._grips), "取消后边缘握把恢复显示")
+check(not w.lock_frame.isVisible(), "取消后描边层隐藏")
+check(w.btn_pin.toolTip() not in ("", "取消置顶", "Unpin"),
+      f"取消后提示语回到「置顶」（实得 {w.btn_pin.toolTip()!r}）")
+_before = w.pos()
+w._drag_press(_mev(QEvent.Type.MouseButtonPress, (10, 10), (210, 210)))
+w._drag_move(_mev(QEvent.Type.MouseMove, (90, 70), (290, 270)))
+check(w._drag_pos is not None and w.pos() != _before, "取消后可正常拖动")
+w._drag_release(_mev(QEvent.Type.MouseButtonRelease, (90, 70), (290, 270)))
+
+print("[G] 置顶便签的层级/让路接线（源码级）——「只抬不降」")
+import app.ui.common as cm
+import app.ui.mac_window as mw
+import app.ui.main as mn
+check(cm.is_pinned_top(w) is True or cm.is_pinned_top(w) is False,
+      "common.is_pinned_top 可判定置顶状态")
+check("def is_pinned_top" in open(cm.__file__, encoding="utf-8").read(),
+      "common 提供统一的 is_pinned_top 判定（收敛「只抬不降」逻辑）")
+_csrc = open(cm.__file__, encoding="utf-8").read()
+check("if is_pinned_top(widget):\n        return" in _csrc,
+      "release_topmost 对置顶窗口直接返回（切到别的 App 也不降层）")
+check("pinned=pinned" in _csrc, "keep_on_top 按置顶状态自动选择更高层级")
+check("_raise_pinned_above" in _csrc,
+      "note_front 抬完被点击窗口后会再把置顶窗口压回最上（点击别的页面也盖不住它）")
+_msrc = open(mn.__file__, encoding="utf-8").read()
+check("def _reassert_pinned" in _msrc and "self._reassert_pinned()" in _msrc,
+      "main._keep_topmost 每拍把置顶便签排在所有卡片之后抬层")
+check("for w in self._sticky_windows():\n            release_topmost(w)" in _msrc,
+      "main._release_app_topmost 已纳入便签（未锁定便签随其它卡片一起让路）")
+check(mw.LEVEL_PINNED > mw.LEVEL_FLOATING and mw.LEVEL_PINNED < 24,
+      f"LEVEL_PINNED={mw.LEVEL_PINNED} 高于浮层({mw.LEVEL_FLOATING})、低于菜单栏(24)")
+check(mw.LEVEL_ABOVE_PINNED > mw.LEVEL_PINNED,
+      f"LEVEL_ABOVE_PINNED={mw.LEVEL_ABOVE_PINNED} 高于置顶层（弹层/模态框不被便签盖住）")
+check("def apply_level" in open(mw.__file__, encoding="utf-8").read()
+      and "def set_resizable" in open(mw.__file__, encoding="utf-8").read(),
+      "mac_window 提供 apply_level（统一层级入口）与 set_resizable（锁定摘原生缩放位）")
+check("def raise_above_pinned" in open(mw.__file__, encoding="utf-8").read(),
+      "mac_window 提供 raise_above_pinned（弹层/模态框提权）")
+# 便签确实把原生缩放一起关掉（只隐藏自绘握把挡不住 macOS 原生边缘缩放）
+check("set_resizable(self, not on, tag=\"sticky-pin\")" in tsrc,
+      "set_pinned 同步摘/补 macOS 原生 resizable styleMask")
+
 w.hide()
 w.deleteLater()
 app.processEvents()

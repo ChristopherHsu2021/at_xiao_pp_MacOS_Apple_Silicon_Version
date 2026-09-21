@@ -27,14 +27,14 @@ from app.core.i18n import tr
 from app.core.todo_signals import bus
 from app.ui.common import (
     PeekCard, NoticeDialog, promote_popup_topmost,
-    EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui, note_front,
+    EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui, note_front, keep_on_top,
 )
 from app.ui.screen_fit import fit_window, scale_qss, s, WINDOW_DEFAULTS
 from app.ui.style import (
     TASK_TITLE_FG, TASK_TITLE_SIZE, TASK_TITLE_WEIGHT,
     TITLE_BAR_QSS, PAGE_TITLE_SIZE, task_title_qss,
 )
-from app.ui.mac_window import apply_stage_exempt
+from app.ui.mac_window import apply_stage_exempt, set_resizable
 from app.ui.context_menu import ActionPopupMenu, ACTION_POPUP_QSS
 from app.ui.rich_editor import RichEditor, svg_icon
 
@@ -1911,7 +1911,12 @@ class StickyNoteWindow(QDialog):
         self.task_id = task["id"]
         self.todo_window = todo_window
         self.ctx = ctx
-        self._locked = False
+        # 「置顶（锁定）」状态：True = 用户点了顶部栏的置顶按钮（选定态）——不可移动、
+        # 不可缩放、层级最高且不被其它页面/应用遮挡；再点一次取消（回到普通卡片行为）。
+        # 这是唯一状态源：``_locked`` 是为 ResizeGrip 保留的只读属性别名（见下方 property），
+        # 而 common.keep_on_top / release_topmost 与 main._keep_topmost 按这个名字识别
+        # 「只抬不降」的窗口（统一的判定见 common.is_pinned_top）。
+        self._pinned_top = False
         self._drag_pos = None  # 拖拽偏移（按下点 - 窗口左上角），非 None 表示正在拖动
         self._done = bool(task.get("done", False))
         self._prio = task.get("priority") or "中"   # 供左上角优先级呼吸灯取色
@@ -1924,9 +1929,11 @@ class StickyNoteWindow(QDialog):
                            | Qt.WindowType.FramelessWindowHint
                            | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # 最小 = 默认尺寸（用户要求只能放大）。默认高 320×280 让卡片底部刚好落在
-        # 「正文框下那一道横线」处：首屏看不到富文本工具栏，用户向下拉伸时才逐渐露出
-        # （2026-09-21 意见：原 304 高会把工具栏顶出一截、显示不完全）。
+        # 最小 = 默认尺寸（用户要求只能放大）。默认 320×280 必须能**完整**看到底部那条
+        # 富文本工具栏（含窄宽度换行后的第二行：高亮/清除格式）——这是 2026-09-21 用户
+        # 意见附图的诉求。注意：光靠窗口高度不够，正文（QTextEdit）在紧凑模式下的最小高
+        # 才是压垮布局的那一环（详见 rich_editor 里 setMinimumHeight 处的算式）：改造前
+        # 竖向需求 371px > 280px → 布局溢出把工具栏裁掉，用户只有往下拉大才慢慢露出来。
         # 真实默认/最小尺寸仍以 screen_fit.WINDOW_DEFAULTS["sticky"] 为准（下方 fit_window 覆盖）。
         self.setMinimumSize(320, 280)
         self.setMaximumSize(1100, 900)
@@ -1971,6 +1978,8 @@ class StickyNoteWindow(QDialog):
         self.btn_complete = QPushButton()
         self.btn_pin = QPushButton()
         self.btn_close = QPushButton()
+        # 按钮提示语（原先三个按钮都没有 tooltip，「置顶」这种行为完全靠猜；
+        # 用户这次给置顶按钮定义了明确的语义，必须有提示语说清「点=锁定/再点=取消」）。
         for b, role in ((self.btn_complete, "complete"),
                         (self.btn_pin, "pin"),
                         (self.btn_close, "close")):
@@ -1985,6 +1994,9 @@ class StickyNoteWindow(QDialog):
                 "QPushButton{background:transparent;border:none;padding:0;}"
                 "QPushButton:hover{background:rgba(0,0,0,0.06);border-radius:8px;}"))
             b.installEventFilter(self)
+        self.btn_complete.setToolTip(tr("完成"))
+        self.btn_close.setToolTip(tr("关闭"))
+        self._refresh_pin_tip()
         # ★ 左上角优先级呼吸灯（低=绿 / 中=橙 / 高=红）：插在 stretch 之前 → 位于顶部栏
         #   最左侧；三个操作按钮仍被 addStretch 顶在右侧，其余布局零改动。
         #   圆点自身 WA_TransparentForMouseEvents，所以顶部栏整条仍可按下拖动。
@@ -2050,6 +2062,20 @@ class StickyNoteWindow(QDialog):
         self.btn_close.clicked.connect(self.close)
         self.title.editingFinished.connect(self._on_title_edited)
 
+        # ★ 「置顶（锁定）」描边层（2026-09-21）：锁定后窗口既拖不动也缩不了，若画面毫无
+        #   变化，用户会以为程序卡死。这里用一层**透明覆盖框**画 2px 主题色描边表示「已选定」。
+        #   用独立子控件而不是给 self.note 加 QSS border —— 后者的边框会参与内容矩形计算，
+        #   锁定/取消的瞬间整张卡片的内容会跳 2px；覆盖框不参与任何布局，零副作用。
+        #   WA_TransparentForMouseEvents：纯装饰层，绝不能吃掉顶部栏/边缘握把的按下事件。
+        self.lock_frame = QFrame(self.note)
+        self.lock_frame.setObjectName("stickyLockFrame")
+        self.lock_frame.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.lock_frame.setStyleSheet(scale_qss(
+            "QFrame#stickyLockFrame{background:transparent;"
+            "border:2px solid #F9730F;border-radius:8px;}"))
+        self.lock_frame.setGeometry(self.rect())
+        self.lock_frame.setVisible(False)
+
     def _build_grips(self):
         m = 7
         self.grip_left = ResizeGrip(self, ("left",), QCursor(Qt.CursorShape.SizeHorCursor))
@@ -2064,8 +2090,10 @@ class StickyNoteWindow(QDialog):
         self.grip_br.setGeometry(self.width() - m, self.height() - m, m, m)
         # 握把必须是窗口内**最上层**的子控件，否则会被铺满窗口的卡片（self.note）盖住
         # 而收不到边缘的按下事件（表现为「边缘拖不动、缩放失效」）。
-        for g in (self.grip_left, self.grip_right, self.grip_bottom,
-                  self.grip_bl, self.grip_br):
+        # 存成列表：resizeEvent 重排、以及「置顶（锁定）」时整体隐藏都要用。
+        self._grips = [self.grip_left, self.grip_right, self.grip_bottom,
+                       self.grip_bl, self.grip_br]
+        for g in self._grips:
             g.raise_()
 
     # ---------- 显示 ----------
@@ -2084,14 +2112,15 @@ class StickyNoteWindow(QDialog):
     # （与 TodoWindow._bar_press/_bar_move 同源）。accept() 是必须的：只有接受了按下
     # 事件，Qt 才会把后续的移动事件持续投递给同一个控件（隐式抓取）。
     def _drag_press(self, e):
-        if self._locked or e.button() != Qt.MouseButton.LeftButton:
+        # 置顶（锁定）态禁止移动：用户对该按钮的定义是「点击则选定：不能移动…」。
+        if self._pinned_top or e.button() != Qt.MouseButton.LeftButton:
             e.ignore()
             return
         self._drag_pos = e.globalPosition().toPoint() - self.pos()
         e.accept()
 
     def _drag_move(self, e):
-        if self._drag_pos is not None and not self._locked:
+        if self._drag_pos is not None and not self._pinned_top:
             self.move(e.globalPosition().toPoint() - self._drag_pos)
             e.accept()
             return
@@ -2180,11 +2209,17 @@ class StickyNoteWindow(QDialog):
         self.btn_complete.setIconSize(QSize(s(20), s(20)))
 
     def retranslate_ui(self):
-        """语言切换：刷新便签内文案（标题占位、编辑器工具栏/占位、呼吸灯提示）。"""
+        """语言切换：刷新便签内文案（标题占位、编辑器工具栏/占位、呼吸灯与三按钮提示）。"""
         self.title.setPlaceholderText(tr("任务标题"))
         if getattr(self, "dot", None) is not None:
             self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
         self._refresh_prio_tag()
+        # 三按钮提示语（含「置顶 / 取消置顶」的状态相关文案）跟随语言
+        if getattr(self, "btn_complete", None) is not None:
+            self.btn_complete.setToolTip(tr("完成"))
+        if getattr(self, "btn_close", None) is not None:
+            self.btn_close.setToolTip(tr("关闭"))
+        self._refresh_pin_tip()
         editor = getattr(self, "editor", None)
         if editor is not None and hasattr(editor, "retranslate"):
             editor.retranslate()
@@ -2205,11 +2240,70 @@ class StickyNoteWindow(QDialog):
             "}QLineEdit#stickyTitle:focus{border-bottom-color:#F97316;}"
         )
 
-    # ---------- 置顶 = 锁定不可移动/缩放 ----------
+    # ---------- 置顶（锁定）：不可移动 / 不可缩放 / 层级最高 ----------
+    @property
+    def _locked(self):
+        """只读别名：``ResizeGrip`` 读 ``window._locked`` 判断是否禁止缩放。
+
+        唯一状态源是 ``_pinned_top``（见 set_pinned）。历史上有过两个属性各写一半的写法，
+        极易出现「能拖但缩不了」这类半锁定状态，故这里只暴露只读属性，不提供 setter。
+        """
+        return self._pinned_top
+
     def toggle_pin(self):
-        self._locked = not self._locked
+        """置顶按钮：点一下「选定」（锁定），再点一下取消选定。"""
+        self.set_pinned(not self._pinned_top)
+
+    def set_pinned(self, on):
+        """设置置顶（锁定）状态 —— 对齐用户对该按钮的完整定义：
+
+        选定（on=True）：
+          1. **不能移动** —— 拖拽按下直接忽略（见 ``_drag_press``）；
+          2. **不能调整窗口大小** —— 隐藏 5 个自绘边缘握把（否则边缘仍是缩放光标），
+             并摘掉 macOS 原生 styleMask 的 resizable 位（只挡握把挡不住原生缩放）；
+          3. **显示优先级最高且不被其它页面或应用遮挡** —— 抬到 LEVEL_PINNED
+             （NSModalPanelWindowLevel，高于其它 App 的浮动窗口、低于菜单栏与弹层）：
+             App 的 1.5s 置顶定时器把它排在所有卡片**之后**抬层，用户的「点击谁谁在前」
+             抬层也会在抬完之后把它再压回去（见 common._raise_pinned_above），
+             并且用户切到别的 App 时其它卡片整体让路而它**不降层**。
+        取消选定（on=False）：以上全部回退，恢复成普通卡片 —— 参与 MRU「点击谁谁在前」，
+        并随其它卡片一起在用户切到别的 App 时让路（不妨碍用户使用其它页面或应用）。
+
+        幂等；状态只有一个来源 ``_pinned_top``，任何入口（按钮 / 探针 / 将来加的右键菜单项）
+        都必须走这里。
+        """
+        on = bool(on)
+        self._pinned_top = on
         self.btn_pin.setIcon(QIcon(self._btn_icon("pin", False)))
         self.btn_pin.setIconSize(QSize(s(20), s(20)))
+        self._refresh_pin_tip()
+        # 边缘握把：锁定时隐藏（保留几何，取消时原样显示回来）
+        for g in getattr(self, "_grips", []):
+            try:
+                g.setVisible(not on)
+            except RuntimeError:
+                continue
+        # macOS 原生边缘缩放：锁定摘位 / 取消补位（与 fit_window(..., resizable=True) 对齐）
+        set_resizable(self, not on, tag="sticky-pin")
+        # 层级：置顶 → 抬到 LEVEL_PINNED 并压到最前；取消 → 回落浮层。
+        # keep_on_top 内部按 _pinned_top 自动选层，这里无需传参。
+        keep_on_top(self, bring_to_front=on)
+        # 视觉反馈：锁定态显示 2px 主题色描边
+        lock_frame = getattr(self, "lock_frame", None)
+        if lock_frame is not None:
+            if on:
+                lock_frame.setGeometry(self.rect())
+                lock_frame.raise_()
+                lock_frame.show()
+            else:
+                lock_frame.hide()
+
+    def _refresh_pin_tip(self):
+        """置顶按钮提示语跟随状态（未锁定=「置顶」，已锁定=「取消置顶」）。"""
+        btn = getattr(self, "btn_pin", None)
+        if btn is None:
+            return
+        btn.setToolTip(tr("取消置顶") if self._pinned_top else tr("置顶"))
 
     def _btn_icon(self, role, hovered):
         """三按钮图标（严格对齐 HTML 的 text-gray-600 / hover 配色 / 完成绿 / 置顶橙）。"""
@@ -2278,9 +2372,16 @@ class StickyNoteWindow(QDialog):
         self.grip_bottom.setGeometry(m, self.height() - m, self.width() - 2 * m, m)
         self.grip_bl.setGeometry(0, self.height() - m, m, m)
         self.grip_br.setGeometry(self.width() - m, self.height() - m, m, m)
-        for g in (self.grip_left, self.grip_right, self.grip_bottom,
-                  self.grip_bl, self.grip_br):
+        for g in self._grips:
+            # 不在此处 setVisible(True)：置顶锁定期间握把必须是隐藏的（见 set_pinned），
+            # raise_() 对隐藏控件无副作用，安全。
             g.raise_()
+        # 「置顶（锁定）」描边层跟随窗口尺寸（锁定期间才可见）
+        lock_frame = getattr(self, "lock_frame", None)
+        if lock_frame is not None:
+            lock_frame.setGeometry(self.rect())
+            if self._pinned_top:
+                lock_frame.raise_()
 
     # ---------- 关闭：回写内容并解除注册（注意：关闭便签≠删除任务） ----------
     def closeEvent(self, e):  # noqa: N802

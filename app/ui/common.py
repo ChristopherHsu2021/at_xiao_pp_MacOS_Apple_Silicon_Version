@@ -65,26 +65,50 @@ def popup_open():
     return False
 
 
-def _mac_set_window_level(widget, floating):
+def is_pinned_top(widget):
+    """窗口是否处于「置顶（锁定）」状态（便签按了置顶按钮）。
+
+    ★ 2026-09-21 引入。置顶便签必须「显示优先级最高且不被其它页面或应用遮挡」，
+    而本模块的层级/让路机制是**全局**的（keep_on_top / release_topmost / note_front
+    都会被 App 的定时器与点击抬层调用）。若让调用方各自判断，迟早有某条路径把置顶
+    便签的层级降回去（典型：用户切到别的 App → _release_app_topmost 把全部卡片
+    降成普通层 → 置顶便签被别的应用盖住）。因此把判定收敛到这里：
+    凡带 ``_pinned_top`` 标记的窗口，本模块一律**只抬不降**。
+    """
+    try:
+        return bool(getattr(widget, "_pinned_top", False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _mac_set_window_level(widget, floating, pinned=False):
     """macOS 专属：置顶→NSFloatingWindowLevel；让路→NSNormalWindowLevel（保持可见、不隐藏）。
 
     与 Windows 的 SetWindowPos(TOPMOST / NOTOPMOST) 在跨平台语义上对等：
     - floating=True  等效于「所有软件顶层不被遮挡」；
-    - floating=False 等效于「点击其它软件就让路」，窗口降到普通层级但**不隐藏**。
-    其它平台（无 PyObjC）直接跳过，由各自原生分支处理。
+    - floating=False 等效于「点击其它软件就让路」，窗口降到普通层级但**不隐藏**；
+    - pinned=True（便签按了「置顶」锁定）→ LEVEL_PINNED（NSModalPanelWindowLevel=8），
+      压得住其它 App 的浮动窗口(3)，又不会盖住菜单栏(24/25)与本程序弹层(101)。
+    其它平台直接跳过，由各自原生分支处理。
+
+    ★ 2026-09-21：实现从 PyObjC 换成 mac_window.apply_level（ctypes + libobjc）。
+    PyObjC（``objc`` / ``AppKit``）在冻结包里若桥接缺失会**静默失效** —— 那样「让路」
+    与「置顶」在 macOS 上等于没写；mac_window 刻意全走 ctypes 正是为了避开这一点。
     """
     if sys.platform != "darwin":
         return
     try:
-        import objc
-        from ctypes import c_void_p
-        from AppKit import NSWindow, NSFloatingWindowLevel, NSNormalWindowLevel
-        nsview = objc.objc_object(c_void_p=int(widget.winId()))
-        nswindow = nsview.window()
-        if nswindow is not None:
-            nswindow.setLevel_(NSFloatingWindowLevel if floating else NSNormalWindowLevel)
+        from app.ui.mac_window import apply_level
+        if not floating:
+            # 让路：降层但**不带 orderBack**（保持既有语义：卡片仍在普通层最前，
+            # 只是不再是浮层；真正「不遮挡其它 App」由 App 失活时的整体让路承担）
+            apply_level(widget, "normal", tag="card-level")
+        elif pinned:
+            apply_level(widget, "pinned", tag="card-level-pinned")
+        else:
+            apply_level(widget, "floating", tag="card-level")
     except Exception:  # noqa: BLE001
-        # PyObjC 缺失 / 环境差异不应影响主流程
+        # 环境差异不应影响主流程
         pass
 
 
@@ -93,9 +117,13 @@ def keep_on_top(widget, bring_to_front=False, activate=False):
 
     注意：只有标志确实缺失时才调用 setWindowFlag —— 该调用会**销毁并重建原生窗口句柄**，
     若此时正有下拉列表/日历弹窗打开，弹窗会被连带销毁（表现为下拉闪退、日历被遮挡）。
+
+    ★ 带 ``_pinned_top``（便签已置顶锁定）的窗口自动改用更高的 LEVEL_PINNED 层级，
+    调用方无需额外传参 —— 避免任何一条抬层路径把置顶便签拉回普通浮层。
     """
     if widget is None:
         return
+    pinned = is_pinned_top(widget)
     try:
         if not (widget.windowFlags() & Qt.WindowType.WindowStaysOnTopHint):
             widget.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
@@ -115,27 +143,62 @@ def keep_on_top(widget, bring_to_front=False, activate=False):
     except Exception:  # noqa: BLE001
         pass
     # macOS：置顶到浮层层级（与 Windows 的 TOPMOST 对等）
-    _mac_set_window_level(widget, True)
+    _mac_set_window_level(widget, True, pinned=pinned)
+
+
+def _iter_visible_popups():
+    """当前打开的弹层顶层窗口清单（下拉列表 / 右键菜单 / 日历）。
+
+    两路合并：``activePopupWidget()``（拿到键盘 grab 时非空）+ 枚举可见的
+    ``Qt.WindowType.Popup`` 顶层窗口（macOS 上自绘弹层常不被登记为 active popup，
+    见 ``popup_open`` 的同款兜底）。窗口类型必须用「低 8 位精确比较」，不能用 ``&``：
+    Qt 的 WindowType 是位标志，Tool/ToolTip/SplashScreen 都含 Popup 位。
+    """
+    out = []
+    try:
+        p = QApplication.activePopupWidget()
+        if p is not None:
+            out.append(p)
+    except RuntimeError:
+        return out
+    try:
+        for w in QApplication.topLevelWidgets():
+            try:
+                if (w is not None and w.isVisible()
+                        and (int(w.windowType()) & 0xFF) == int(Qt.WindowType.Popup)
+                        and w not in out):
+                    out.append(w)
+            except RuntimeError:
+                continue
+    except RuntimeError:
+        pass
+    return out
 
 
 def promote_popup_topmost():
-    """把当前打开的弹出窗口（下拉列表 / 日历）顶到 TopMost 层最上方。
+    """把当前打开的弹出窗口（下拉列表 / 日历 / 右键菜单）顶到最上层。
 
-    卡片窗口本身常驻 TopMost，其弹出列表同样位于 TopMost 层但层级更低，
-    会被卡片压住（即「年月日框被页面遮挡」）。这里在弹窗显示后立刻提升其 Z 序。
+    Windows：卡片窗口本身常驻 TopMost，其弹出列表同样位于 TopMost 层但层级更低，
+    会被卡片压住（即「年月日框被页面遮挡」）→ SetWindowPos(HWND_TOPMOST) 提权。
+
+    ★ 2026-09-21 macOS：便签「置顶（锁定）」会把自己抬到 LEVEL_PINNED(8)，而 Qt 给弹层的
+    默认层级（浮层 3）比它低 —— 若弹层不提权，用户在置顶便签之外的页面上点下拉框/右键，
+    列表会被置顶便签整个盖住（点不到）。故这里对 macOS 同样提权，直上
+    ``LEVEL_ABOVE_PINNED``（NSPopUpMenuWindowLevel=101，AppKit 给弹出菜单预留的层级）。
     """
-    try:
-        popup = QApplication.activePopupWidget()
-    except RuntimeError:
-        return
-    if popup is None:
-        return
-    try:
-        import ctypes
-        hwnd = int(popup.winId())
-        ctypes.windll.user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_BASE)
-    except Exception:  # noqa: BLE001
-        pass
+    for popup in _iter_visible_popups():
+        try:
+            import ctypes
+            hwnd = int(popup.winId())
+            ctypes.windll.user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_BASE)
+        except Exception:  # noqa: BLE001
+            pass
+        if sys.platform == "darwin":
+            try:
+                from app.ui.mac_window import raise_above_pinned
+                raise_above_pinned(popup, tag="popup-level")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def promote_popup_soon():
@@ -157,6 +220,26 @@ _front_stack = []
 _FRONT_STACK_MAX = 8
 
 
+def _raise_pinned_above(except_widget=None):
+    """把所有「置顶（锁定）」窗口压到最上层（``except_widget`` 自身除外）。
+
+    便签按「置顶」后要求「显示优先级最高且不被其他页面或应用遮挡」。本程序的 Z 序是
+    用户意图驱动的（点谁谁在前），若置顶便签也参与这套排序，用户一点别的页面它就会被
+    盖住 —— 直到下一拍 1.5s 定时器才被重新抬起。所以在每次「点击抬层」之后立刻把置顶
+    窗口再抬一遍，做到**当即**压过被点击的那扇窗。零状态：直接枚举带标记的顶层窗口。
+    """
+    try:
+        for w in QApplication.topLevelWidgets():
+            try:
+                if (w is not None and w is not except_widget and w.isVisible()
+                        and is_pinned_top(w)):
+                    keep_on_top(w, bring_to_front=True)
+            except RuntimeError:
+                continue
+    except RuntimeError:
+        pass
+
+
 def note_front(widget, raise_now=True):
     """把 widget 记为「用户最近操作的顶层窗口」，并（默认）立刻抬到本程序最前。"""
     try:
@@ -172,6 +255,8 @@ def note_front(widget, raise_now=True):
         del _front_stack[:-_FRONT_STACK_MAX]
         if raise_now:
             keep_on_top(w, bring_to_front=True)
+            # 置顶（锁定）便签永远最后抬 → 立刻压过刚被点击的窗口（见 _raise_pinned_above）
+            _raise_pinned_above(except_widget=w)
     except RuntimeError:
         return
 
@@ -249,8 +334,16 @@ def install_front_tracker(app):
 
 
 def release_topmost(widget):
-    """将窗口从系统 TopMost 层释放，避免遮挡其他软件的对话框。"""
+    """将窗口从系统 TopMost 层释放，避免遮挡其他软件的对话框。
+
+    ★ 2026-09-21：带 ``_pinned_top`` 标记（便签已按「置顶」锁定）的窗口**不参与让路** ——
+    用户对该按钮的要求原文是「显示优先级最高且不被其他页面或应用遮挡」，所以即使用户切到
+    别的 App（App 失活 → 全量 _release_app_topmost），置顶便签也必须留在最高层级。
+    这也正是把判定收敛到 ``is_pinned_top`` 的原因：少一处判断就会漏一条路径。
+    """
     if widget is None:
+        return
+    if is_pinned_top(widget):
         return
     try:
         import ctypes
@@ -385,6 +478,18 @@ class NoticeDialog(QDialog):
         row.addWidget(ok)
         row.addStretch(1)
         lay.addLayout(row)
+
+    def showEvent(self, e):  # noqa: N802
+        super().showEvent(e)
+        # ★ 2026-09-21：便签「置顶（锁定）」后自身在 LEVEL_PINNED(8)，而本模态提示框是
+        #   普通层的 Dialog —— 一旦被置顶便签压住，用户连「确定」都点不到（窗口关不掉）。
+        #   模态框理应压在最上，故显示后立刻提到 LEVEL_ABOVE_PINNED。
+        if sys.platform == "darwin":
+            try:
+                from app.ui.mac_window import raise_above_pinned
+                raise_above_pinned(self, tag="NoticeDialog")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 class GlassWindow(QDialog):
@@ -827,6 +932,10 @@ class EditContextMenu(QWidget):
             self.move(global_pos)
         self.show()
         self.raise_()
+        # ★ 2026-09-21：本菜单是 Qt.Popup 顶层窗口，默认层级只有浮层(3)；若父窗口是
+        #   「置顶（锁定）」的便签（已在 LEVEL_PINNED=8），菜单会被自家卡片盖住 → 点不到。
+        #   显示后提权到 LEVEL_ABOVE_PINNED（见 promote_popup_topmost 的 macOS 分支）。
+        promote_popup_soon()
         return self
 
 

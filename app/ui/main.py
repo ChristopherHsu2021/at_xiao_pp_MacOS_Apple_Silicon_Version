@@ -250,6 +250,12 @@ class App:
     def _keep_topmost(self):
         if self._foreground_belongs_to_other_app():
             self._release_app_topmost()
+            # ★ 2026-09-21 置顶（锁定）便签：用户对本程序的要求是「点击置顶则选定：
+            #   显示优先级最高且**不被其他页面或应用遮挡**」。上面的整体让路已经把普通
+            #   卡片降到普通层（release_topmost 会自动跳过带 _pinned_top 的窗口），
+            #   这里再主动抬一次置顶便签，保证「刚锁定便签 → 立刻切到别的 App」这条
+            #   时序下它依然压在最上（raise_ 只 orderFront，不激活本程序，不抢焦点）。
+            self._reassert_pinned()
             return
         if self._popup_menu_open or popup_open():
             # 有弹出窗口（右键菜单 / 下拉列表 / 日历 / 模态框）时不要重申置顶，
@@ -286,6 +292,33 @@ class App:
             # 有「最近使用」才抬层：从未点过任何窗口时 Z 序保持原样，不动
             for w in iter_front_order(cards):
                 keep_on_top(w, bring_to_front=True)
+        # ★ 置顶（锁定）便签最后抬：压过上面所有卡片 —— 用户要求「显示优先级最高且不被
+        #   其他页面遮挡」，所以它**不参与** MRU 排序（否则点别的页面就会把它盖住）。
+        self._reassert_pinned()
+
+    def _sticky_windows(self):
+        """本程序当前打开的便签窗口（注册表挂在待办窗口上，不属于 self.windows）。"""
+        todo_win = self.windows.get("todo")
+        if todo_win is None:
+            return []
+        try:
+            return [w for w in getattr(todo_win, "sticky_windows", {}).values()
+                    if w is not None and w.isVisible()]
+        except RuntimeError:
+            return []
+
+    def _reassert_pinned(self):
+        """把已「置顶（锁定）」的便签重新压到最上层（带 ``_pinned_top`` 标记）。
+
+        零状态：直接读便签自身的标记，不需要维护额外清单。带标记的窗口在
+        ``common.keep_on_top`` 里会自动改用更高的 LEVEL_PINNED 层级（macOS）。
+        """
+        for w in self._sticky_windows():
+            try:
+                if getattr(w, "_pinned_top", False):
+                    keep_on_top(w, bring_to_front=True)
+            except RuntimeError:
+                continue
 
     def _owned_cards(self):
         """本程序所有「卡片类」顶层窗口（宠物 / 场景 / 各功能页 / 便签 / 播放器）。
@@ -355,6 +388,13 @@ class App:
         for window in self.windows.values():
             if window is not None and window.isVisible():
                 release_topmost(window)
+        # ★ 2026-09-21：便签卡片此前**漏在这份让路清单之外** —— 用户切到别的 App 时，
+        #   未按「置顶」锁定的便签仍留在浮层、继续压着其它应用，这正是用户要求的
+        #   「其他时候不能妨碍用户使用其他页面或者应用」没被满足的根因（其它卡片都降了，
+        #   只有便签没降）。补上后：未锁定便签随其它卡片一起让路；已锁定的便签由
+        #   release_topmost 内部自动跳过（保持最高层级），继续满足「不被其他应用遮挡」。
+        for w in self._sticky_windows():
+            release_topmost(w)
         if self.music.window is not None and self.music.window.isVisible():
             release_topmost(self.music.window)
         self._topmost_released = True
