@@ -6,7 +6,7 @@ sys.path.insert(0, ROOT)
 
 import PyQt6  # noqa
 from PyQt6.QtWidgets import (QApplication, QPushButton, QGraphicsView, QGraphicsScene,
-                             QLabel)
+                             QGraphicsProxyWidget, QLabel)
 from PyQt6.QtCore import Qt, QEvent, QPoint, QPointF, QRectF, QSize
 from PyQt6.QtGui import QMouseEvent, QContextMenuEvent, QColor, QWheelEvent
 from types import SimpleNamespace
@@ -283,10 +283,9 @@ check("max size 980x820", shot.maximumWidth() == 980 and shot.maximumHeight() ==
 check("padding 20px (p-5)", shot.note.layout().contentsMargins().left() == 20,
       str(shot.note.layout().contentsMargins().left()))
 check("card radius 8px (rounded-lg)", "border-radius:8px" in shot.note.styleSheet())
-# 代理控件**不再**挂 QGraphicsDropShadowEffect：卡片与窗口等大、投影被视口裁掉（不可见），
-# 而图形特效会让每次重绘都对整卡做高斯模糊 → 半透明置顶窗卡顿（用户反馈）。这里锁死该不变式。
-check("proxy has no drop shadow (perf, avoids per-repaint blur)",
-      shot._proxy.graphicsEffect() is None)
+# 卡片上不再有任何图形特效/代理层：整卡是普通控件，QSS 实底绘制（不透明、无逐帧模糊）。
+check("sticky window has no graphics effect (no per-repaint blur)",
+      shot.graphicsEffect() is None and shot.note.graphicsEffect() is None)
 # 顶栏三按钮已通过 _btn_icon 接线（role 属性 + 有效图标）
 for _role, _b in (("complete", shot.btn_complete), ("pin", shot.btn_pin),
                   ("close", shot.btn_close)):
@@ -388,12 +387,16 @@ check("menu edit action selectAll works",
       shot.editor.editor.textCursor().selectedText())
 _menu2.close()
 
-# 性能回归：代理控件不再挂图形特效（投影不可见却每次重绘全卡模糊 → 卡顿）；
-# sceneRect 与视口等大（无滚动区间）
-check("proxy has no graphics effect (perf)", shot._proxy.graphicsEffect() is None)
-check("scene rect not padded (no scroll range)",
-      shot._scene.sceneRect().size().toSize() == shot.size(),
-      f"{shot._scene.sceneRect().size().toSize()} vs {shot.size()}")
+# 结构回归（2026-09-21 第三次返工）：便签卡片不再经 QGraphicsView/QGraphicsProxyWidget
+# 代理承载 —— 代理层会让不透明实底被合成成半透明、且鼠标事件经「视图→场景→代理」
+# 三级路由后丢失（透明 + 点不动 + 拖不动）。现与 TodoWindow 同构。
+check("sticky has no proxy layer", not shot.findChildren(QGraphicsProxyWidget),
+      "便签内不应再有 QGraphicsProxyWidget")
+check("card is direct child of window", shot.note.parent() is shot,
+      "卡片应为窗口的直接子控件（根布局内）")
+check("card has styled background (opaque paint)",
+      shot.note.testAttribute(Qt.WidgetAttribute.WA_StyledBackground),
+      "卡片需 WA_StyledBackground 才能画出实底")
 
 for name, (WW, HH) in {"default": (440, 400), "narrow": (400, 380), "wide": (620, 520)}.items():
     shot.resize(WW, HH)
@@ -411,12 +414,12 @@ for name, (WW, HH) in {"default": (440, 400), "narrow": (400, 380), "wide": (620
 
 check("screenshot saved", os.path.exists(r"D:\自研软件\AT小PP\sticky_default.png"))
 
-# ---- 便签滚轮防滚动：内容为空时滚轮不得把整张卡片顶偏/裁切 ----
+# ---- 便签滚轮防滚动：卡片是普通控件（非 QGraphicsView），滚轮不得移动/裁切卡片 ----
 print("== sticky wheel scroll guard ==")
 shot.resize(440, 400)
 app.processEvents()
-check("sticky uses _StickyView", isinstance(shot._view, twmod._StickyView),
-      type(shot._view).__name__)
+check("sticky uses plain card widget (no view)",
+      not shot.findChildren(QGraphicsView), "便签内不应再有 QGraphicsView")
 
 
 def _wheel(widget, dy):
@@ -427,26 +430,12 @@ def _wheel(widget, dy):
     QApplication.sendEvent(widget, ev)
 
 
-_v = shot._view
-_c0 = _v.mapToScene(_v.viewport().rect().center())
+_g0 = shot.note.geometry()
 for _dy in (-120, 120, -240, 240, -480):
-    _wheel(_v.viewport(), _dy)
+    _wheel(shot.note, _dy)
     app.processEvents()
-_c1 = _v.mapToScene(_v.viewport().rect().center())
-check("wheel never scrolls sticky", _c0 == _c1, f"{_c0} -> {_c1}")
-
-# 对照组：同样的 scene 尺寸，普通 QGraphicsView 会被滚轮滚走（证明该断言有意义）
-_vr = QGraphicsView()
-_vr.setScene(QGraphicsScene())
-_vr.scene().setSceneRect(QRectF(-36, -36, 440 + 72, 400 + 72))
-_vr.resize(440, 400)
-_vr.show()          # 必须 show：否则 viewport 尺寸未确定，滚动区间为 0，测不出滚动
-app.processEvents()
-_r0 = _vr.mapToScene(_vr.viewport().rect().center())
-_wheel(_vr.viewport(), -120)
-_r1 = _vr.mapToScene(_vr.viewport().rect().center())
-check("control: plain view DOES scroll", _r0 != _r1, f"{_r0} -> {_r1}")
-_vr.hide()
+check("wheel never offsets sticky card", shot.note.geometry() == _g0,
+      f"{_g0} -> {shot.note.geometry()}")
 
 # 内容超长时，滚轮仍由内层 QTextEdit 自行消费（禁用视图滚动不能把编辑器一起禁掉）
 shot.editor.set_html("<p>" + ("长文本滚动测试<br>" * 80) + "</p>")
