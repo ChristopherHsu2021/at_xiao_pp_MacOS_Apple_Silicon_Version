@@ -1929,11 +1929,9 @@ class StickyNoteWindow(QDialog):
                            | Qt.WindowType.FramelessWindowHint
                            | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # 最小 = 默认尺寸（用户要求只能放大）。默认 320×280 必须能**完整**看到底部那条
-        # 富文本工具栏（含窄宽度换行后的第二行：高亮/清除格式）——这是 2026-09-21 用户
-        # 意见附图的诉求。注意：光靠窗口高度不够，正文（QTextEdit）在紧凑模式下的最小高
-        # 才是压垮布局的那一环（详见 rich_editor 里 setMinimumHeight 处的算式）：改造前
-        # 竖向需求 371px > 280px → 布局溢出把工具栏裁掉，用户只有往下拉大才慢慢露出来。
+        # 最小 = 默认尺寸（用户要求只能放大）。默认 320×280 下**不显示**富文本工具栏
+        # （2026-09-21 需求反转：此前要求默认尺寸完整看到工具栏，现改为默认隐藏、
+        # 用户往下拉大窗口时工具栏随高度增加慢慢长出来 —— 见 _update_toolbar_reveal）。
         # 真实默认/最小尺寸仍以 screen_fit.WINDOW_DEFAULTS["sticky"] 为准（下方 fit_window 覆盖）。
         self.setMinimumSize(320, 280)
         self.setMaximumSize(1100, 900)
@@ -1942,14 +1940,12 @@ class StickyNoteWindow(QDialog):
         self._build_grips()
         # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
         fit_window(self, "sticky", resizable=True, max_size=(1100, 900))
-        # ★ 2026-09-21 兜底（用户意见附图：「默认尺寸下看不到富文本工具栏」）：
-        #   窗口高度必须 ≥ 卡片布局的真实最小高度，否则 QVBoxLayout 无处可让，只能把
-        #   底部那条**固定高度**的工具栏挤出窗口 → 换行后的第二行（高亮/清除格式）被裁。
-        #   仅把正文最小高改小（rich_editor 里 s(56)）已经够用，但那套算式依赖
-        #   「按钮 28px + 内宽 288px 恰好换成 9+2 两行」；一旦字体/缩放/按钮尺寸变化
-        #   多换出一行，就会再次裁切。这里改为**按真实布局反算**并抬升最小高。
-        #   正常情况（需求 233 < 280）本方法是空操作，只在异常时兜底。
-        self._ensure_toolbar_visible()
+        # ★ 2026-09-21 需求反转（用户意见附图）：默认尺寸（320×280，与最小尺寸相同）
+        #   下**不显示**富文本工具栏；用户往下拉大窗口时，多出的高度按 1:1 逐步
+        #   分配给工具栏 —— 拉多少露多少，直到工具栏完整高度（≈72px，即窗口约
+        #   352px 高）后不再变化，再拉高就是正文区自动长高。
+        #   实现见 _update_toolbar_reveal（挂在本类 resizeEvent 上，每帧同步）。
+        self._update_toolbar_reveal()
         # 便签背景色持久化（2026-09-21 修 Bug）：读回该任务上次选的色；
         # 没设置过则用默认主题米色。persist=False —— 初始化不该写库。
         self.set_bg(task.get("bg") or STICKY_DEFAULT_BG, persist=False)
@@ -1962,41 +1958,37 @@ class StickyNoteWindow(QDialog):
         bus().done_changed.connect(self._on_done_changed,
                                     Qt.ConnectionType.UniqueConnection)
 
-    # ---------- 尺寸兜底 ----------
-    def _ensure_toolbar_visible(self):
-        """把窗口最小高度抬到「底部富文本工具栏完整可见」所需的高度（异常时兜底）。
+    # ---------- 尺寸联动：工具栏渐进显示 ----------
+    def _update_toolbar_reveal(self):
+        """随窗口高度渐进露出底部富文本工具栏（2026-09-21 需求反转）。
 
-        背景：便签的默认尺寸与最小尺寸是**同一个值** 320×280（screen_fit.WINDOW_DEFAULTS
-        经 fit_window 写成了显式最小值）。显式最小值会让 QLayout 的 SetDefaultConstraint
-        失效（Qt 只在「控件没有显式最小尺寸」时才用布局最小高约束主窗口），于是布局
-        可以被压到自身最小高之下 —— 被压掉的恰好是底部那条 setFixedHeight 的工具栏。
+        规则（用户原话「默认尺寸下不显示富文字处理框，用户下拉增加窗口高度
+        则慢慢显示出来」）：
+          - 默认尺寸 320×280（也是最小尺寸）→ 工具栏露出量 = 0，整条隐藏；
+          - 窗口每拉高 1px → 工具栏多露出 1px（自底向上「长出来」）；
+          - 露满工具栏完整高度（内宽 288px 下 ≈72px，即窗口约 352px 高）后
+            封顶，再拉高多出的空间全部给正文区（QTextEdit stretch）。
 
-        算式（s() = ×0.8 后的实际像素）：
-          卡片内宽 = 320 − 2×s(20)=16 → 288
-          11 个 28px 按钮 + 4px 水平间距 → 第一行 9 个、第二行 2 个
-          工具栏高 = 上 s(8)=6 + 28 + 4 + 28 + 下 s(8)=6 = 72
-          整卡需求 = 上16 + 顶栏19 + 10 + 标题29 + 13 + (正文45 + 13 + 工具栏72) + 下16
-                   = 233 ≤ 280 → 默认尺寸下无需改动（本方法为**空操作**）。
-
-        构造期窗口宽度还是 0，直接量 toolbar.width() 会把每个按钮都判成单独一行而算出
-        天大的高度，所以先用**设计宽度**预置工具栏高度，再按布局最小高反算。
+        算式：露出量 = clamp(0, 工具栏完整高, 窗口高 − 默认高 280)。
+        工具栏完整高按当前窗口宽反算（FlowToolbar 窄宽度自动换行：宽了 1 行、
+        窄了 2 行），resizeEvent 里布局尚未重排，但 self.width() 已是最新值，
+        卡片内宽 = 窗口宽 − 2×s(20)（根布局 0 边距、卡片左右各 s(20)）。
         """
+        tb = getattr(getattr(self, "editor", None), "toolbar", None)
+        if tb is None:
+            return
         try:
-            design_w = WINDOW_DEFAULTS.get("sticky", (320, 280))[0]
-            inner = max(1, design_w - 2 * s(20))     # 卡片左右内边距各 s(20)
-            tb = getattr(self.editor, "toolbar", None)
-            if tb is not None:
-                wrapped = tb.flow.heightForWidth(inner)
-                if wrapped > 0:
-                    tb.setFixedHeight(wrapped)       # 预置：让布局最小高算得对
-            need = self.note.layout().minimumSize().height()
-            if need > self.minimumHeight():
-                self.setMinimumHeight(need)
-                if self.height() < need:
-                    self.resize(self.width(), need)
+            inner = max(1, self.width() - 2 * s(20))
+            full = tb.flow.heightForWidth(inner)
+            base = WINDOW_DEFAULTS.get("sticky", (320, 280))[1]   # 默认高 280
+            extra = max(0, self.height() - base)                  # 下拉多出的高度
+            tb.set_reveal_cap(min(full, extra))
         except Exception:
-            # 纯兜底逻辑：任何异常都不该影响便签打开（宁可维持 320×280 原样）。
-            pass
+            # 纯联动逻辑：任何异常都不该影响便签缩放（宁可退回工具栏常显）。
+            try:
+                tb.set_reveal_cap(None)
+            except Exception:
+                pass
 
     # ---------- 构建 ----------
     def _build_note(self):
@@ -2426,6 +2418,8 @@ class StickyNoteWindow(QDialog):
             lock_frame.setGeometry(self.rect())
             if self._pinned_top:
                 lock_frame.raise_()
+        # ★ 工具栏渐进显示：每帧按最新窗口高度重算露出量（见 _update_toolbar_reveal）
+        self._update_toolbar_reveal()
 
     # ---------- 关闭：回写内容并解除注册（注意：关闭便签≠删除任务） ----------
     def closeEvent(self, e):  # noqa: N802

@@ -25,11 +25,10 @@ DOCK_BASE_WIDTH = 269
 #   - 截图里 1443×904 px 对应 1440×900 pt，故 1 px ≈ 1 pt，可直读窗口像素尺寸；
 #   - todo_add → 352×606（原 448 高不够，富文本工具栏与「提醒时间/优先级」互相压盖）
 #   - settings → 368×458（按意见附图 1:1 刻算）
-#   - sticky   → 320×280（2026-09-21 用户二次意见：默认尺寸下必须**完整**露出底部
-#                富文本工具栏（含窄宽度换行后的第二行「高亮/清除格式」），不再沿用
-#                旧设计「默认高只到正文框下横线、下拉才露出工具栏」。由
-#                RichEditor 紧凑正文最小高 s(56) + StickyNoteWindow._ensure_toolbar_visible
-#                双重保证：竖向需求 ≈233px ≤ 280px，默认尺寸即可全部可见）
+#   - sticky   → 320×280（2026-09-21 需求反转：默认尺寸下**不显示**底部富文本工具栏，
+#                用户往下拉大窗口时工具栏随高度增加慢慢露出 —— 由
+#                StickyNoteWindow._update_toolbar_reveal + FlowToolbar.set_reveal_cap
+#                实现：露出量 = clamp(0, 工具栏完整高, 窗口高 − 280)，1:1 渐进）
 #   - alarm_add 默认 432 保持；仅当「重复」选到「仅一次 / 自定义」时临时增高到 490
 #     （见 alarm_window.AlarmWindow._add_size_expanded）
 WINDOW_DEFAULTS = {

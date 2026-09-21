@@ -505,6 +505,24 @@ class FlowToolbar(QFrame):
         policy.setHeightForWidth(True)
         policy.setVerticalPolicy(QSizePolicy.Policy.Minimum)
         self.setSizePolicy(policy)
+        # ★ 渐进显示上限（2026-09-21 便签新需求）：None = 不限制（完整模式编辑器
+        #   照旧，工具栏始终全高）；设为整数后工具栏实际高度不得超过该值 —— 超出
+        #   的按钮部分被裁掉，由便签窗口随「下拉增高」逐步放宽上限，实现
+        #   「默认尺寸下不显示工具栏、拉大窗口才慢慢长出来」的效果。
+        self._reveal_cap = None
+
+    def set_reveal_cap(self, cap):
+        """设置/解除渐进显示上限（None=解除，恢复完整高度）。
+
+        内部做了去重：cap 未变化时不重复 setFixedHeight，避免拖拽缩放窗口时
+        每个像素都触发一次布局抖动。
+        """
+        if cap is not None:
+            cap = max(0, int(cap))
+        if cap == self._reveal_cap:
+            return
+        self._reveal_cap = cap
+        self._sync_height()
 
     def resizeEvent(self, e):  # noqa: N802
         super().resizeEvent(e)
@@ -516,8 +534,14 @@ class FlowToolbar(QFrame):
 
     def _sync_height(self):
         needed = self.flow.heightForWidth(self.width())
-        if needed > 0 and self.height() != needed:
-            self.setFixedHeight(needed)
+        # ★ 渐进显示：先按上限裁剪，再做固定高度同步（0 = 整条工具栏隐藏）。
+        if self._reveal_cap is not None:
+            needed = min(needed, self._reveal_cap)
+        if needed > 0:
+            if self.height() != needed:
+                self.setFixedHeight(needed)
+        else:
+            self.setFixedHeight(0)
 
 
 class RichEditor(QWidget):
@@ -721,9 +745,12 @@ class RichEditor(QWidget):
         #                    = 371px > 280px → QVBoxLayout 无法压缩正文（已到最小高），
         #   整体溢出窗口，底部被裁掉——正好裁在工具栏上：用户看到第一行按钮，换行后的
         #   第二行（高亮/清除格式）只剩半个，且必须把窗口往下拉大才慢慢露出来。
-        #   把紧凑模式正文最小高改成 56 设计像素（≈45px）后总需求降到 236px < 280px，
-        #   默认尺寸即可完整显示工具栏；窗口被拉大时正文区仍靠 stretch 自动长高。
-        #   完整模式（添加/编辑任务页）窗口高 606，180 不成问题，保持原值。
+        #   把紧凑模式正文最小高改成 56 设计像素（≈45px）后总需求降到 236px < 280px。
+        #   ★ 2026-09-21 需求反转：便签默认尺寸下工具栏**不显示**，由便签窗口
+        #   （StickyNoteWindow._update_toolbar_reveal）按下拉高度渐进露出 —— 见
+        #   FlowToolbar.set_reveal_cap；正文最小高 s(56) 保证 280 高度下正文仍有
+        #   可用的编辑空间，保持不变。完整模式（添加/编辑任务页）窗口高 606，
+        #   180 不成问题，保持原值。
         self.editor.setMinimumHeight(s(56) if self._compact else 96)
         self.editor.currentCharFormatChanged.connect(self._sync_active)
         self.editor.cursorPositionChanged.connect(self._sync_active)

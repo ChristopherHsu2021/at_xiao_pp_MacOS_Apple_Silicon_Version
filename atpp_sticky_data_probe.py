@@ -12,13 +12,12 @@
      同构：窗口根布局 → 不透明实底 QWidget(self.note) → 普通子控件层级。
   D2) 行为验证：合成鼠标事件证明「按下 + 移动」真的让窗口跟随；卡片像素 alpha=255
      且为底色 #fffaf5（不透明）；置顶（锁定）时拖拽被拒。
-  E) 默认尺寸（320×280）下富文本工具栏**完整可见**（含窄宽度换行后的第二行）——
-     用户意见附图的核心诉求：此前紧凑编辑器 180px 硬最小高使卡片竖向需求 371px > 280px，
-     布局溢出把底部工具栏裁掉，只有把窗口往下拉大才慢慢露出来。
-  E2) 该修复的**结构性兜底**：StickyNoteWindow._ensure_toolbar_visible 在构造期把窗口
-     最小高抬到「布局真实最小高」（含换行后的整条工具栏）。因为 fit_window 写入的是
-     **显式**最小尺寸，会令 QLayout 的 SetDefaultConstraint 失效 —— 布局可以被压到
-     自身最小高之下，被压掉的正好是底部那条 setFixedHeight 的工具栏。
+  E) 富文本工具栏**渐进显示**（2026-09-21 需求反转）：默认尺寸（320×280）下工具栏
+     **整条隐藏**；用户往下拉大窗口时，多出的高度按 1:1 逐步分配给工具栏 —— 拉多少
+     露多少，直到完整高度（内宽 288px 下 ≈72px）后封顶；缩回默认高度则重新隐藏。
+  E2) 渐进显示的接线（源码级）：StickyNoteWindow._update_toolbar_reveal 在构造期
+     （fit_window 之后）与 resizeEvent 每帧调用，按「窗口高 − 默认高 280」计算露出量，
+     经 FlowToolbar.set_reveal_cap 裁剪工具栏实际高度（0 = 隐藏）。
   F) 置顶按钮语义（用户定义）：点一下选定 —— 不能移动、不能调整大小（隐藏握把 +
      摘掉 macOS 原生 resizable 位）、加橙色描边；再点一下取消，恢复可拖可缩。
   G) 层级/让路接线（源码级）：置顶便签「只抬不降」（LEVEL_PINNED / release_topmost 跳过 /
@@ -169,18 +168,32 @@ w._drag_move(_mev(QEvent.Type.MouseMove, (80, 60), (280, 260)))
 check(w.pos() == _before, f"锁定状态下移动窗口位置不变（实得 {w.pos()}）")
 w.set_pinned(False)
 
-print("[E] 默认尺寸下富文本工具栏必须完整可见（用户意见附图的核心诉求）")
+print("[E] 工具栏渐进显示：默认尺寸隐藏，下拉增高逐步露出（2026-09-21 需求反转）")
 w.resize(320, 280)
-app.processEvents()
 for _ in range(4):
     app.processEvents()
 _tb = w.editor.toolbar
-_tb_bottom = _tb.mapTo(w, _tb.rect().bottomLeft()).y()
-check(_tb.isVisible(), "富文本工具栏可见")
-check(_tb_bottom < w.height(),
-      f"工具栏底边必须落在窗口内（底边 {_tb_bottom} < 窗高 {w.height()}）")
+_inner = max(1, w.width() - 2 * s_local(20))
+_full = _tb.flow.heightForWidth(_inner)
+check(_full > 0, f"内宽 {_inner}px 下工具栏完整高 {_full}px（11 按钮窄宽度换行两行）")
+check(not _tb.isVisible() or _tb.height() == 0,
+      f"默认尺寸 320×280 下工具栏整条隐藏（实得 visible={_tb.isVisible()} h={_tb.height()}）")
 check(w.editor.editor.height() >= s_local(40),
-      f"正文区仍有可用高度（实得 {w.editor.editor.height()}px）")
+      f"工具栏隐藏后正文区仍有可用编辑高度（实得 {w.editor.editor.height()}px）")
+check(w.minimumHeight() == 280,
+      f"窗口最小高保持 280 不变（实得 {w.minimumHeight()}），只影响工具栏露出量")
+# 下拉 20px → 露出 20px（1:1 渐进）
+w.resize(320, 300)
+for _ in range(4):
+    app.processEvents()
+check(_tb.height() == min(_full, 20),
+      f"窗口拉高到 300 → 工具栏露出 20px（实得 {_tb.height()}）")
+# 拉满 → 完整露出且 11 个按钮全部在窗口内
+w.resize(320, 400)
+for _ in range(4):
+    app.processEvents()
+check(_tb.height() == _full,
+      f"窗口拉高到 400（≥ 280+{_full}）→ 工具栏完整露出（实得 {_tb.height()}）")
 _clipped = []
 for _key, _b in w.editor._cmd_buttons.items():
     _p = _b.mapTo(w, _b.rect().bottomLeft())
@@ -191,38 +204,30 @@ for _b in (w.editor.fore_btn, w.editor.hili_btn):
     if _p.y() >= w.height():
         _clipped.append("color")
 check(not _clipped,
-      f"工具栏 11 个按钮（含换行后的第二行）全部在窗口内（被裁：{_clipped}）")
-check(w.layout().minimumSize().height() <= w.height(),
-      f"卡片布局最小需求高度不超过默认窗高（需求 {w.layout().minimumSize().height()}"
-      f" <= {w.height()}）—— 溢出正是原先「工具栏被裁掉、下拉拉大才露出」的根因")
+      f"完整露出后 11 个按钮（含换行后的第二行）全部在窗口内（被裁：{_clipped}）")
+# 缩回默认 → 重新隐藏
+w.resize(320, 280)
+for _ in range(4):
+    app.processEvents()
+check(_tb.height() == 0,
+      f"缩回默认高 280 后工具栏重新隐藏（实得 {_tb.height()}）")
 
-print("[E2] 尺寸兜底：_ensure_toolbar_visible（防未来字体/缩放变化再次裁掉工具栏）")
+print("[E2] 渐进显示接线（源码级）：构造期 + resizeEvent 双入口")
 _tsrc_e2 = open(tw.__file__, encoding="utf-8").read()
-check("def _ensure_toolbar_visible" in _tsrc_e2,
-      "StickyNoteWindow 提供 _ensure_toolbar_visible（按布局最小高反算）")
-check("self._ensure_toolbar_visible()" in _tsrc_e2,
-      "构造期（fit_window 之后）即调用一次 —— 打开便签就是完整可见的尺寸")
-check(w.minimumHeight() >= w.note.layout().minimumSize().height(),
-      f"窗口最小高 >= 卡片布局最小需求（{w.minimumHeight()} >= "
-      f"{w.note.layout().minimumSize().height()}）：fit_window 的显式最小值会让 QLayout 的"
-      " SetDefaultConstraint 失效，必须自己抬，否则布局可被压到工具栏之下")
-_rows, _cur, _x = [], [], 0
-_inner_w = max(1, w.editor.toolbar.width())
-for _it in w.editor.toolbar.flow._items:
-    _ih = w.editor.toolbar.flow._hint(_it)
-    if _cur and _x + _ih.width() > _inner_w:
-        _rows.append(len(_cur))
-        _cur, _x = [], 0
-    _cur.append(_it)
-    _x += _ih.width() + 4
-if _cur:
-    _rows.append(len(_cur))
-check(sum(_rows) == 11,
-      f"11 个按钮全部参与换行布局（内宽 {_inner_w} → 分行 {_rows}，即「9+2」两行）")
-check(w.height() >= w.minimumHeight()
-      and w.minimumHeight() == max(280, w.note.layout().minimumSize().height()),
-      f"默认高 280 未被兜底逻辑撑大（最小高 {w.minimumHeight()}；需求 "
-      f"{w.note.layout().minimumSize().height()} ≤ 280 时本兜底应为空操作）")
+check("def _update_toolbar_reveal" in _tsrc_e2,
+      "StickyNoteWindow 提供 _update_toolbar_reveal（按窗口高度计算工具栏露出量）")
+check("self._update_toolbar_reveal()" in _tsrc_e2.split("def _update_toolbar_reveal")[0],
+      "构造期（fit_window 之后）即调用一次 —— 默认尺寸打开便签即为隐藏态")
+_resized_src = _tsrc_e2.split("def resizeEvent")[1].split("def closeEvent")[0]
+check("self._update_toolbar_reveal()" in _resized_src,
+      "resizeEvent 每帧重算露出量（下拉拖拽缩放实时联动）")
+import app.ui.rich_editor as re_mod
+_resrc = open(re_mod.__file__, encoding="utf-8").read()
+check("def set_reveal_cap" in _resrc,
+      "FlowToolbar 提供 set_reveal_cap（渐进显示上限，None=解除/完整模式不受影响）")
+check("_reveal_cap" in _resrc.split("def _sync_height")[1].split("def ")[0]
+      if "_sync_height" in _resrc else False,
+      "_sync_height 同步时遵守 _reveal_cap 上限（0 = 整条隐藏）")
 
 print("[F] 置顶按钮 = 选定/取消选定（不可移动、不可缩放、层级最高）")
 check(not w._pinned_top and not w._locked, "初始未锁定")
