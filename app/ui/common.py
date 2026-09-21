@@ -16,7 +16,7 @@ import traceback
 
 from app.core.i18n import tr
 from app.ui.style import GLASS_STYLE, COLOR
-from app.ui.mac_window import apply_stage_exempt, make_resizable
+from app.ui.mac_window import apply_stage_exempt, make_resizable, mac_log
 from app.ui.screen_fit import scale_qss, s
 
 # SetWindowPos 标志：NOSIZE(0x1) | NOMOVE(0x2) | NOACTIVATE(0x10) | SHOWWINDOW(0x40)
@@ -30,12 +30,39 @@ def popup_open():
 
     这些弹出窗口都是独立顶层窗口：若此时再对卡片窗口「重申置顶 + 抢激活」，
     弹出窗口会因层级被压低而**被卡片盖住**，或直接失去激活而**立刻关闭**（看起来像闪退）。
+
+    ★ 2026-09-21 加固（Apple Silicon 端「重复下拉框点开一闪就没、没法选」）：
+    ``QApplication.activePopupWidget()`` 只在弹出层**抢到键盘 grab** 时才非空；本程序的
+    卡片窗口自身就是置顶浮层（``WindowStaysOnTopHint``），挂在它上面的自绘 ``Qt.Popup``
+    面板在 macOS 上并不总能被 Qt 登记为 active popup —— 探测一失效，1.5s 周期的
+    ``_keep_topmost`` 就会照常 raise + activate 卡片窗口，面板随即失去激活被系统关掉。
+    因此这里补一路**零状态**的兜底探测：直接枚举本程序「可见的 Popup 顶层窗口」。
+    它跟随窗口的真实生命周期自动开合，不需要任何手工计数，也就没有「计数泄漏导致
+    全程序永久不再置顶」的风险。
     """
     try:
-        return (QApplication.activePopupWidget() is not None
-                or QApplication.activeModalWidget() is not None)
+        if (QApplication.activePopupWidget() is not None
+                or QApplication.activeModalWidget() is not None):
+            return True
     except RuntimeError:
         return False
+    # 兜底：枚举可见的 Popup 顶层窗口（右键菜单 / 自绘下拉面板 / 富文本下拉）。
+    # ★ 判断窗口类型必须用「低 8 位 == Popup」精确比较，不能用 `&`：
+    #   Qt 的 WindowType 是位标志，Popup = 0x9 本身就含 Window 位(0x1)，于是普通窗口
+    #   `1 & 9 == 1` 恒真 —— 用 `&` 会把**所有**普通窗口都误判成弹层，置顶定时器反而
+    #   永久停摆。Tool(0xb) / ToolTip(0xd) / SplashScreen(0xf) 同样含 Popup 位，也要排除。
+    #   这里只认 Popup，不认 ToolTip（挂件 hover 提示会长期可见，不该长期冻结定时器）。
+    try:
+        for w in QApplication.topLevelWidgets():
+            try:
+                if (w is not None and w.isVisible()
+                        and (int(w.windowType()) & 0xFF) == int(Qt.WindowType.Popup)):
+                    return True
+            except RuntimeError:
+                continue
+    except RuntimeError:
+        return False
+    return False
 
 
 def _mac_set_window_level(widget, floating):
@@ -755,17 +782,26 @@ class _DropdownPanel(QWidget):
             row.setFixedHeight(s(34))
             row.setCursor(Qt.CursorShape.PointingHandCursor)
             row.setStyleSheet(DROPDOWN_ITEM_SEL_QSS if i == current else DROPDOWN_ITEM_QSS)
-            row.clicked.connect(lambda _checked=False, idx=i: self._pick(idx))
+            # 选中回调统一走 guard_ui：本函数运行在 popup 的鼠标事件处理栈里，
+            # PyQt6 对逃逸到 Qt 事件循环的 Python 异常直接 qFatal() → 整个 App abort。
+            row.clicked.connect(
+                lambda _checked=False, idx=i: guard_ui("下拉选项", self._pick, idx)
+            )
             lay.addWidget(row)
 
     def _pick(self, idx):
-        """选中某项：先收起面板，再写回索引（触发 currentIndexChanged → 业务回调）。"""
+        """选中某项：先收起面板，再把索引**延后一轮事件循环**写回 combo。
+
+        ★ 为什么必须延后（Apple Silicon 端「选一下闪退」的根因之一）：
+        ``setCurrentIndex`` 会同步触发业务回调 —— 本程序里是
+        ``AlarmWindow._on_repeat`` → 切子页 + ``setMinimumSize`` / ``resize`` 主窗口。
+        若在 popup 自己的鼠标事件处理栈里同步改主窗口几何，macOS 会在 popup 关闭
+        过程中重排原生窗口（NSWindow），实测会把面板/窗口一并拆掉，表现为「闪退」。
+        延后到下一轮事件循环时面板已完全关闭，主窗口再 resize 就与 popup 生命周期无关。
+        """
         combo = self._combo
         self.close()
-        try:
-            combo.setCurrentIndex(idx)
-        except RuntimeError:
-            pass
+        QTimer.singleShot(0, lambda c=combo, i=idx: guard_ui("下拉选中写回", _apply_combo_pick, c, i))
 
     def closeEvent(self, event):  # noqa: N802
         # 面板关闭（选中 / 点击外部 / Esc）时清掉 combo 的引用，保证下次能再次弹出。
@@ -775,6 +811,15 @@ class _DropdownPanel(QWidget):
         except RuntimeError:
             pass
         super().closeEvent(event)
+
+
+def _apply_combo_pick(combo, idx):
+    """延后写回选中索引；combo 已被销毁 / 索引越界时静默跳过（绝不冒泡异常）。"""
+    try:
+        if combo is not None and 0 <= idx < combo.count():
+            combo.setCurrentIndex(idx)
+    except RuntimeError:
+        pass
 
 
 class StyledComboBox(QComboBox):
@@ -790,6 +835,16 @@ class StyledComboBox(QComboBox):
         self._panel = None
 
     def showPopup(self):  # noqa: N802
+        # ★ showPopup / hidePopup 都是 **Qt 虚函数**（Qt 在 mousePressEvent 等内部直接
+        #   调用它们）。PyQt6 对「从虚函数里逃逸的 Python 异常」的处理是 qFatal() →
+        #   整个 App abort() —— 用户看到的就是「点一下重复下拉框，程序直接闪退」。
+        #   因此构面板、定位、显示的全过程必须整体兜住（详见 guard_ui 的说明）。
+        guard_ui("下拉列表弹出", self._open_panel)
+
+    def hidePopup(self):  # noqa: N802
+        guard_ui("下拉列表收起", self._close_panel)
+
+    def _open_panel(self):
         if self._panel is not None or self.count() == 0:
             return
         items = [self.itemText(i) for i in range(self.count())]
@@ -808,10 +863,22 @@ class StyledComboBox(QComboBox):
         panel.move(x, y)
 
         self._panel = panel
-        panel.show()
-        panel.raise_()
+        try:
+            # 先登记引用再 show：面板一旦可见，popup_open() 的兜底探测立即生效，
+            # 1.5s 置顶定时器就此让路（否则它会 raise/activate 卡片窗口，把面板顶掉）。
+            panel.show()
+            panel.raise_()
+        except Exception as exc:  # noqa: BLE001
+            self._panel = None
+            mac_log(f"下拉面板显示失败：{exc!r}", tag="dropdown")
+            return
+        mac_log(
+            f"下拉面板弹出：items={len(items)} current={self.currentIndex()} "
+            f"rect=({x},{y},{panel.width()},{panel.height()})",
+            tag="dropdown",
+        )
 
-    def hidePopup(self):  # noqa: N802
+    def _close_panel(self):
         panel = self._panel
         self._panel = None
         if panel is not None:
@@ -819,6 +886,7 @@ class StyledComboBox(QComboBox):
                 panel.close()
             except RuntimeError:
                 pass
+            mac_log("下拉面板收起", tag="dropdown")
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)

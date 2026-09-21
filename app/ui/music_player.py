@@ -1879,15 +1879,18 @@ class LyricOverlayWindow(QDialog):
         controls.setContentsMargins(s(0), s(0), s(0), s(0))
         controls.setSpacing(s(0))
         controls.addStretch(1)
-        self.loop_b = IconButton("loop", 30)
-        self.prev_b = IconButton("prev", 30)
-        self.play_b = IconButton("play", 30)
-        self.next_b = IconButton("next", 30)
+        # ★ 2026-09-21 用户意见：顶部这一排功能键「显示可以稍微大一点」。
+        #   图标按钮 30→34、A±/L± 文字键 48×26→54×32（字号 16→19）、
+        #   承载槽 58×28→64×34（槽高必须 ≥ 图标按钮边长，否则固定尺寸按钮会被裁边）。
+        self.loop_b = IconButton("loop", 34)
+        self.prev_b = IconButton("prev", 34)
+        self.play_b = IconButton("play", 34)
+        self.next_b = IconButton("next", 34)
         self.font_up_b = QPushButton("A+")
         self.font_down_b = QPushButton("A-")
         self.lyric_plus_b = QPushButton("L+")
         self.lyric_minus_b = QPushButton("L-")
-        self.color_b = IconButton("palette", 30)
+        self.color_b = IconButton("palette", 34)
         self._icon_buttons = [self.loop_b, self.prev_b, self.play_b, self.next_b, self.color_b]
         for b in (self.loop_b, self.prev_b, self.play_b, self.next_b, self.color_b):
             b.setProperty("plainOverlay", True)
@@ -1895,7 +1898,7 @@ class LyricOverlayWindow(QDialog):
             b.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: transparent; border: none; }")
         for b in (self.font_up_b, self.font_down_b, self.lyric_plus_b, self.lyric_minus_b):
             b.setObjectName("toolBtn")
-            b.setFixedSize(s(48), s(26))
+            b.setFixedSize(s(54), s(32))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.setStyleSheet(scale_qss("""
@@ -1904,7 +1907,7 @@ QPushButton#toolBtn {
     border: none;
     color: #f97510;
     font-family: {ui_font};
-    font-size: 16px;
+    font-size: 19px;
     font-weight: 800;
     padding: 0;
 }
@@ -1972,22 +1975,27 @@ QPushButton:hover {{ border: 2px solid #ffffff; }}
     def _apply_scale(self):
         s = self._scale
         self.setFixedSize(int(self.BASE_W * s), int(self.BASE_H * s))
-        slot_w = int(58 * s)
+        # 槽宽 / 槽高同步放大（64×34）：9 个槽 × 64 = 576 < BASE_W(730)，不会溢出被裁。
+        slot_w = int(64 * s)
         for slot in self._control_slots:
             slot.setFixedWidth(slot_w)
-            slot.setFixedHeight(int(28 * s))
+            slot.setFixedHeight(int(34 * s))
         for b in self._icon_buttons:
-            base = 30
-            b.setFixedSize(int(base * s), int(base * s))
+            base = 34
+            side = int(base * s)
+            b.setFixedSize(side, side)
+            # 图标按设计稿 30px 基准绘制，这里显式把缩放系数对齐到「按钮实际边长 / 30」，
+            # 使图标与按钮同尺度（否则按钮变大而图标不变，看起来图标反而变小了）。
+            b._glyph_scale = side / 30.0
         for b in self._font_buttons:
-            b.setFixedSize(int(48 * s), int(28 * s))
+            b.setFixedSize(int(54 * s), int(32 * s))
             b.setStyleSheet(scale_qss(f"""
 QPushButton#toolBtn {{
     background: transparent;
     border: none;
     color: #f97510;
     font-family: {UI_FONT_STACK};
-    font-size: {max(12, int(16 * s))}px;
+    font-size: {max(13, int(19 * s))}px;
     font-weight: 800;
     padding: 0;
 }}
