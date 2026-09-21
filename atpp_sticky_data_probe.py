@@ -1,4 +1,4 @@
-"""回归探针：本轮三项修复的可验证部分（macOS 原生层级/拖拽行为需在 Mac 真机确认）。
+"""回归探针：本轮修复的可验证部分（macOS 原生层级/拖拽行为需在 Mac 真机确认）。
 
 覆盖：
   A) 便签透明化修复：窗口类型必须是 Qt::Dialog（而非 Qt::Window）——行为验证
@@ -6,6 +6,10 @@
   B) 便签基类为 QDialog（对齐可正常工作的 TodoWindow）。
   C) 覆盖安装数据保护：_is_inside_bundle 能正确判定「包内/包外」，且 get_data_dir
      的防御重定向代码到位。
+  D) 便签点击崩溃修复：拖拽改纯 Python 绝对坐标跟随，事件过滤器不得再直接调用
+     startSystemMove()（macOS 子控件上下文会抛 NSException 硬崩）/ grabMouse()
+     （WA_TranslucentBackground 无边框窗偶发失效）；应置 _pending_drag + event.ignore()
+     冒泡到窗口自身 mousePressEvent。
 """
 import os
 import sys
@@ -75,6 +79,22 @@ check(not pu._is_inside_bundle("/Users/me/Documents/notes"),
 psrc = open(pu.__file__, encoding="utf-8").read()
 check("_is_inside_bundle(d)" in psrc, "get_data_dir 内含 _is_inside_bundle(d) 防御判定")
 check("重定向到 Application Support" in psrc, "get_data_dir 内含重定向到 Application Support 的分支")
+
+print("[D] 便签点击崩溃修复：拖拽改纯 Python 绝对坐标跟随（无 startSystemMove/grabMouse）")
+tsrc = open(tw.__file__, encoding="utf-8").read()
+# 仅统计「实际调用」self.startSystemMove( / self.grabMouse( / self.releaseMouse(，
+# 注释里的历史描述不算（用括号后紧跟形参或调用特征过滤）。
+import re
+call_calls = re.findall(r"self\.(?:startSystemMove|grabMouse|releaseMouse)\s*\(", tsrc)
+check(len(call_calls) == 0,
+      f"便签拖拽路径不得再直接调用 startSystemMove/grabMouse/releaseMouse（实测 {len(call_calls)} 处）")
+check("self._pending_drag = True" in tsrc, "事件过滤器可拖区置 _pending_drag=True")
+check("event.ignore()" in tsrc, "事件过滤器对可拖区按下调 event.ignore() 冒泡到窗口")
+# 窗口自身 mousePressEvent 接管起点：StickyNoteWindow 类内有 def mousePressEvent
+sn_block = tsrc.split("class StickyNoteWindow")[1]
+check("def mousePressEvent(self, e):" in sn_block.split("def eventFilter")[0]
+      or "def mousePressEvent(self, e):" in sn_block,
+      "StickyNoteWindow 定义了自身 mousePressEvent 接管拖拽起点")
 
 print()
 if fails:

@@ -1900,8 +1900,10 @@ class StickyNoteWindow(QDialog):
       这是修复「macOS 下点开便签、切到别的 App 再切回来时整张卡片变透明/只剩边框」
       的关键——Qt::Window 类型的 WA_TranslucentBackground 窗口在 App 失活时会被
       系统整块丢掉内容（仅剩窗口阴影一圈「边框」），Qt::Dialog 类型不受此 bug 影响。
-    - 无边框 + 半透明背景，卡片用 QGraphicsProxyWidget 承载；窗口可用原生
-      startSystemMove 拖拽标题栏移动、可边缘/角落缩放。
+    - 无边框 + 半透明背景，卡片用 QGraphicsProxyWidget 承载；窗口拖拽采用「按下经
+      event.ignore() 冒泡到窗口自身 mousePressEvent 记起点 + mouseMoveEvent 绝对坐标
+      跟随」的纯 Python 方案（macOS 无边框 + 半透明窗下 startSystemMove 会硬崩、
+      grabMouse 偶发失效）；可边缘/角落缩放（ResizeGrip）。
     - 顶部三按钮：完成（确认键，双向同步列表项划线/颜色）/ 置顶（锁定不可移动与缩放）/
       关闭。
     - 可编辑标题（QLineEdit，下划线样式）+ 复用的紧凑富文本编辑器（11 按钮工具栏）。
@@ -1916,6 +1918,7 @@ class StickyNoteWindow(QDialog):
         self.ctx = ctx
         self._locked = False
         self._drag = None  # 手动拖拽状态：{"start_global": QPoint, "start_pos": QPoint}
+        self._pending_drag = False  # 事件过滤器置位、待窗口自身 mousePressEvent 接管的拖拽标志
         self._done = bool(task.get("done", False))
         self._prio = task.get("priority") or "中"   # 供左上角优先级呼吸灯取色
         self._rotate = 0
@@ -2088,6 +2091,17 @@ class StickyNoteWindow(QDialog):
         self._sync_geometry()
         QTimer.singleShot(0, self._sync_geometry)
 
+    def mousePressEvent(self, e):  # noqa: N802
+        # 拖拽起点在此记录（事件已从可拖区经 event.ignore() 冒泡到窗口自身，上下文正确）。
+        # 不在此调用 startSystemMove()/grabMouse() —— 二者在 macOS 无边框 + 半透明窗上
+        # 分别会硬崩 / 偶发失效。实际移动交给 mouseMoveEvent 绝对坐标跟随。
+        if self._pending_drag and e.button() == Qt.MouseButton.LeftButton:
+            self._pending_drag = False
+            gp = (e.globalPosition().toPoint()
+                  if hasattr(e, "globalPosition") else e.globalPos())
+            self._drag = {"start_global": gp, "start_pos": self.pos()}
+        super().mousePressEvent(e)
+
     def eventFilter(self, obj, event):  # noqa: N802
         et = event.type()
         # 三按钮 hover：切换图标配色（对齐 HTML hover:text-green/orange/red）
@@ -2100,9 +2114,9 @@ class StickyNoteWindow(QDialog):
                 obj.setIcon(QIcon(self._btn_icon(role, False)))
                 return False
         # 拖拽移动：顶部栏空白区 或 卡片背景（非按钮/输入框/正文）均可抓取。
-        # 早期只有 24px 顶部细条能拖，用户抓卡片主体却拖不动 → 体验「吃力」。
-        # 改用「按下即 grabMouse + 全局鼠标追踪」的手动拖拽，比 startSystemMove 在
-        # Frameless+置顶+代理旋转控件下更可靠、且整张卡片任意空白都能抓。
+        # 整张卡片任意空白都能抓；可拖区判定见下方 draggable。事件过滤器只置
+        # _pending_drag 并 event.ignore() 冒泡到窗口自身 mousePressEvent（避免
+        # 在子控件上下文直接拖拽导致 macOS 崩溃 / 失效），实际移动在 mouseMoveEvent。
         if et == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
             if not self._locked:
                 draggable = False
@@ -2114,16 +2128,19 @@ class StickyNoteWindow(QDialog):
                     child = self.note.childAt(event.position().toPoint())
                     draggable = (child is None or child is self.note)
                 if draggable:
-                    gp = (event.globalPosition().toPoint()
-                          if hasattr(event, "globalPosition") else event.globalPos())
-                    self._drag = {"start_global": gp, "start_pos": self.pos()}
-                    # 优先原生系统拖拽：macOS 无边框 + 置顶 + 代理控件下，手动
-                    # grabMouse 偶发收不到 mouseMove（表现为「几乎拖不动」）。
-                    # startSystemMove 由 NSWindow 在系统层处理整段移动，最稳；
-                    # 返回 True 即系统已接管 → 清空 _drag 禁用手动 move，防双移。
-                    # 不支持/失败再退回手动 grabMouse 方案（与早期行为一致）。
-                    if not self.startSystemMove():
-                        self.grabMouse()
+                    # ★ 拖拽改用「窗口自身 mousePressEvent 接管 + 绝对坐标跟随」的纯
+                    #   Python 方案（与 TodoWindow 顶栏拖拽同源），彻底避开两类崩溃/失效：
+                    #   - 曾在事件过滤器里直接调 startSystemMove() → macOS 上
+                    #     [NSWindow performWindowDragWithEvent:] 因事件上下文来自子控件
+                    #     而抛 NSException → 整 App 硬崩（用户实测「点上去就崩」）；
+                    #   - 也试过 grabMouse()，但 WA_TranslucentBackground 无边框窗在
+                    #     macOS 上偶发捕获失败 → 表现为「几乎拖不动」。
+                    #   故此处只置 _pending_drag 并 event.ignore()，让按下事件沿父链冒泡
+                    #   到窗口自身的 mousePressEvent（正确上下文）记录起点；其后鼠标移动
+                    #   经子控件默认 ignore 冒泡到窗口 mouseMoveEvent，按绝对坐标 self.move
+                    #   使窗口跟随光标 → 光标始终落在同一控件上 → 移动持续送达、不丢帧。
+                    self._pending_drag = True
+                    event.ignore()
             return False
         # 便签卡片任意位置右键：弹出统一的自绘菜单（含标题、内容、工具栏；
         # 拦截 QLineEdit/QTextEdit 的原生右键菜单，保证与设计完全一致）
@@ -2138,7 +2155,7 @@ class StickyNoteWindow(QDialog):
             return True
         return super().eventFilter(obj, event)
 
-    # ---------- 手动拖拽（按下即 grabMouse，全局追踪鼠标） ----------
+    # ---------- 拖拽（窗口自身 mousePressEvent 记起点，此处绝对坐标跟随） ----------
     def mouseMoveEvent(self, e):  # noqa: N802
         if self._drag is not None and not self._locked:
             gp = (e.globalPosition().toPoint()
@@ -2151,8 +2168,7 @@ class StickyNoteWindow(QDialog):
     def mouseReleaseEvent(self, e):  # noqa: N802
         if self._drag is not None:
             self._drag = None
-            self.releaseMouse()
-            return
+        self._pending_drag = False
         super().mouseReleaseEvent(e)
 
     # ---------- 完成（确认键）：双向同步 ----------
