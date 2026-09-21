@@ -15,6 +15,10 @@
   E) 默认尺寸（320×280）下富文本工具栏**完整可见**（含窄宽度换行后的第二行）——
      用户意见附图的核心诉求：此前紧凑编辑器 180px 硬最小高使卡片竖向需求 371px > 280px，
      布局溢出把底部工具栏裁掉，只有把窗口往下拉大才慢慢露出来。
+  E2) 该修复的**结构性兜底**：StickyNoteWindow._ensure_toolbar_visible 在构造期把窗口
+     最小高抬到「布局真实最小高」（含换行后的整条工具栏）。因为 fit_window 写入的是
+     **显式**最小尺寸，会令 QLayout 的 SetDefaultConstraint 失效 —— 布局可以被压到
+     自身最小高之下，被压掉的正好是底部那条 setFixedHeight 的工具栏。
   F) 置顶按钮语义（用户定义）：点一下选定 —— 不能移动、不能调整大小（隐藏握把 +
      摘掉 macOS 原生 resizable 位）、加橙色描边；再点一下取消，恢复可拖可缩。
   G) 层级/让路接线（源码级）：置顶便签「只抬不降」（LEVEL_PINNED / release_topmost 跳过 /
@@ -191,6 +195,34 @@ check(not _clipped,
 check(w.layout().minimumSize().height() <= w.height(),
       f"卡片布局最小需求高度不超过默认窗高（需求 {w.layout().minimumSize().height()}"
       f" <= {w.height()}）—— 溢出正是原先「工具栏被裁掉、下拉拉大才露出」的根因")
+
+print("[E2] 尺寸兜底：_ensure_toolbar_visible（防未来字体/缩放变化再次裁掉工具栏）")
+_tsrc_e2 = open(tw.__file__, encoding="utf-8").read()
+check("def _ensure_toolbar_visible" in _tsrc_e2,
+      "StickyNoteWindow 提供 _ensure_toolbar_visible（按布局最小高反算）")
+check("self._ensure_toolbar_visible()" in _tsrc_e2,
+      "构造期（fit_window 之后）即调用一次 —— 打开便签就是完整可见的尺寸")
+check(w.minimumHeight() >= w.note.layout().minimumSize().height(),
+      f"窗口最小高 >= 卡片布局最小需求（{w.minimumHeight()} >= "
+      f"{w.note.layout().minimumSize().height()}）：fit_window 的显式最小值会让 QLayout 的"
+      " SetDefaultConstraint 失效，必须自己抬，否则布局可被压到工具栏之下")
+_rows, _cur, _x = [], [], 0
+_inner_w = max(1, w.editor.toolbar.width())
+for _it in w.editor.toolbar.flow._items:
+    _ih = w.editor.toolbar.flow._hint(_it)
+    if _cur and _x + _ih.width() > _inner_w:
+        _rows.append(len(_cur))
+        _cur, _x = [], 0
+    _cur.append(_it)
+    _x += _ih.width() + 4
+if _cur:
+    _rows.append(len(_cur))
+check(sum(_rows) == 11,
+      f"11 个按钮全部参与换行布局（内宽 {_inner_w} → 分行 {_rows}，即「9+2」两行）")
+check(w.height() >= w.minimumHeight()
+      and w.minimumHeight() == max(280, w.note.layout().minimumSize().height()),
+      f"默认高 280 未被兜底逻辑撑大（最小高 {w.minimumHeight()}；需求 "
+      f"{w.note.layout().minimumSize().height()} ≤ 280 时本兜底应为空操作）")
 
 print("[F] 置顶按钮 = 选定/取消选定（不可移动、不可缩放、层级最高）")
 check(not w._pinned_top and not w._locked, "初始未锁定")

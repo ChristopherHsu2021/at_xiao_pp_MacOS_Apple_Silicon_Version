@@ -1942,6 +1942,14 @@ class StickyNoteWindow(QDialog):
         self._build_grips()
         # MacBook Air 2020（1440×900）基准的舒适默认大小；macOS 下追加原生边缘缩放
         fit_window(self, "sticky", resizable=True, max_size=(1100, 900))
+        # ★ 2026-09-21 兜底（用户意见附图：「默认尺寸下看不到富文本工具栏」）：
+        #   窗口高度必须 ≥ 卡片布局的真实最小高度，否则 QVBoxLayout 无处可让，只能把
+        #   底部那条**固定高度**的工具栏挤出窗口 → 换行后的第二行（高亮/清除格式）被裁。
+        #   仅把正文最小高改小（rich_editor 里 s(56)）已经够用，但那套算式依赖
+        #   「按钮 28px + 内宽 288px 恰好换成 9+2 两行」；一旦字体/缩放/按钮尺寸变化
+        #   多换出一行，就会再次裁切。这里改为**按真实布局反算**并抬升最小高。
+        #   正常情况（需求 233 < 280）本方法是空操作，只在异常时兜底。
+        self._ensure_toolbar_visible()
         # 便签背景色持久化（2026-09-21 修 Bug）：读回该任务上次选的色；
         # 没设置过则用默认主题米色。persist=False —— 初始化不该写库。
         self.set_bg(task.get("bg") or STICKY_DEFAULT_BG, persist=False)
@@ -1953,6 +1961,42 @@ class StickyNoteWindow(QDialog):
         # 删除线/颜色与确认键即刻同步（无需靠列表的 notify_sticky 特例）。UniqueConnection 防重复连。
         bus().done_changed.connect(self._on_done_changed,
                                     Qt.ConnectionType.UniqueConnection)
+
+    # ---------- 尺寸兜底 ----------
+    def _ensure_toolbar_visible(self):
+        """把窗口最小高度抬到「底部富文本工具栏完整可见」所需的高度（异常时兜底）。
+
+        背景：便签的默认尺寸与最小尺寸是**同一个值** 320×280（screen_fit.WINDOW_DEFAULTS
+        经 fit_window 写成了显式最小值）。显式最小值会让 QLayout 的 SetDefaultConstraint
+        失效（Qt 只在「控件没有显式最小尺寸」时才用布局最小高约束主窗口），于是布局
+        可以被压到自身最小高之下 —— 被压掉的恰好是底部那条 setFixedHeight 的工具栏。
+
+        算式（s() = ×0.8 后的实际像素）：
+          卡片内宽 = 320 − 2×s(20)=16 → 288
+          11 个 28px 按钮 + 4px 水平间距 → 第一行 9 个、第二行 2 个
+          工具栏高 = 上 s(8)=6 + 28 + 4 + 28 + 下 s(8)=6 = 72
+          整卡需求 = 上16 + 顶栏19 + 10 + 标题29 + 13 + (正文45 + 13 + 工具栏72) + 下16
+                   = 233 ≤ 280 → 默认尺寸下无需改动（本方法为**空操作**）。
+
+        构造期窗口宽度还是 0，直接量 toolbar.width() 会把每个按钮都判成单独一行而算出
+        天大的高度，所以先用**设计宽度**预置工具栏高度，再按布局最小高反算。
+        """
+        try:
+            design_w = WINDOW_DEFAULTS.get("sticky", (320, 280))[0]
+            inner = max(1, design_w - 2 * s(20))     # 卡片左右内边距各 s(20)
+            tb = getattr(self.editor, "toolbar", None)
+            if tb is not None:
+                wrapped = tb.flow.heightForWidth(inner)
+                if wrapped > 0:
+                    tb.setFixedHeight(wrapped)       # 预置：让布局最小高算得对
+            need = self.note.layout().minimumSize().height()
+            if need > self.minimumHeight():
+                self.setMinimumHeight(need)
+                if self.height() < need:
+                    self.resize(self.width(), need)
+        except Exception:
+            # 纯兜底逻辑：任何异常都不该影响便签打开（宁可维持 320×280 原样）。
+            pass
 
     # ---------- 构建 ----------
     def _build_note(self):
