@@ -1893,9 +1893,13 @@ class PriorityPulseDot(QWidget):
         p.drawEllipse(QRectF(cx - r_ring, cy - r_ring, r_ring * 2, r_ring * 2))
 
 
-class StickyNoteWindow(QWidget):
+class StickyNoteWindow(QDialog):
     """便签式任务卡片窗口（对齐参考 HTML 的 #taskCard）。
 
+    - 基类取 QDialog（与 TodoWindow 任务清单主窗口一致）：窗口类型为 Qt::Dialog，
+      这是修复「macOS 下点开便签、切到别的 App 再切回来时整张卡片变透明/只剩边框」
+      的关键——Qt::Window 类型的 WA_TranslucentBackground 窗口在 App 失活时会被
+      系统整块丢掉内容（仅剩窗口阴影一圈「边框」），Qt::Dialog 类型不受此 bug 影响。
     - 无边框 + 半透明背景，卡片用 QGraphicsProxyWidget 承载；窗口可用原生
       startSystemMove 拖拽标题栏移动、可边缘/角落缩放。
     - 顶部三按钮：完成（确认键，双向同步列表项划线/颜色）/ 置顶（锁定不可移动与缩放）/
@@ -1917,7 +1921,10 @@ class StickyNoteWindow(QWidget):
         self._rotate = 0
         self._bg = QColor(STICKY_DEFAULT_BG)  # 软件主题米色（默认背景，实际值下面 set_bg 读回）
 
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint
+        # ★ 窗口类型必须是 Qt::Dialog（见类注释）：否则 macOS 下 App 失活后
+        #   WA_TranslucentBackground 内容被系统整块丢掉、便签变透明只剩边框。
+        self.setWindowFlags(Qt.WindowType.Dialog
+                           | Qt.WindowType.FramelessWindowHint
                            | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # 最小 = 默认尺寸（用户要求只能放大）。默认高 320×280 让卡片底部刚好落在
@@ -2110,7 +2117,13 @@ class StickyNoteWindow(QWidget):
                     gp = (event.globalPosition().toPoint()
                           if hasattr(event, "globalPosition") else event.globalPos())
                     self._drag = {"start_global": gp, "start_pos": self.pos()}
-                    self.grabMouse()
+                    # 优先原生系统拖拽：macOS 无边框 + 置顶 + 代理控件下，手动
+                    # grabMouse 偶发收不到 mouseMove（表现为「几乎拖不动」）。
+                    # startSystemMove 由 NSWindow 在系统层处理整段移动，最稳；
+                    # 返回 True 即系统已接管 → 清空 _drag 禁用手动 move，防双移。
+                    # 不支持/失败再退回手动 grabMouse 方案（与早期行为一致）。
+                    if not self.startSystemMove():
+                        self.grabMouse()
             return False
         # 便签卡片任意位置右键：弹出统一的自绘菜单（含标题、内容、工具栏；
         # 拦截 QLineEdit/QTextEdit 的原生右键菜单，保证与设计完全一致）

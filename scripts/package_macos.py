@@ -592,6 +592,18 @@ def _write_first_open_readme(path: Path, app_name: str,
 五、机型提醒
     arm64 包：仅适用于 M 系列芯片（M1/M2/M3/M4…）的 Mac。
     Intel 芯片的 Mac 请改用 Intel 兼容版（文件名带 intel 的那个包）。
+
+六、覆盖安装 / 卸载，我的数据会丢吗？
+    不会。你的所有数据（设置、待办、闹钟、你上传的音乐、歌词、封面、便签内容、
+    收藏等）都保存在应用包**之外**的系统目录：
+        ~/Library/Application Support/AT小PP
+    而 .app 本身只含程序与只读素材。因此：
+      - 覆盖安装：把新 AT小PP.app 拖到 /Applications 覆盖旧的，数据目录原封不动，
+        新版本自动沿用你原来的所有内容。
+      - 卸载：把 AT小PP.app 拖进废纸篓即可，上面的数据目录不会被自动删除
+        （如需彻底清理，手动删除 ~/Library/Application Support/AT小PP 即可）。
+    应用启动时也有防御性兜底：万一数据目录被解析到 .app 包内，会自动重定向回上面的
+    系统目录，从机制上杜绝「覆盖安装把用户数据一起删掉」的可能。
 """
     try:
         path.write_text(text, encoding="utf-8")
