@@ -57,7 +57,10 @@ from app.ui.install_window import (
     show_running_warning, schedule_inno_uninstall_cleanup, is_admin,
     relaunch_as_admin, launch_detached_deelevated,
 )
-from app.ui.common import keep_on_top, release_topmost, popup_open
+from app.ui.common import (
+    keep_on_top, release_topmost, popup_open,
+    note_front, front_widget, iter_front_order, install_front_tracker,
+)
 
 
 APP_INSTANCE_MUTEX = "Local\\ATXiaoPPMain"
@@ -118,6 +121,9 @@ class App:
         # 常驻任务清单挂件：软件启动即创建并显示，退出前一直存在
         self.todo_dock = TodoDock(self)
         self.todo_dock.show()
+        # 「点击即抬到最前」：全局记录用户点过哪扇窗口（详见 common.note_front 的注释）。
+        # 必须在任何卡片窗口 show() 之前装好，保证第一次点击就能被记录。
+        install_front_tracker(QApplication.instance())
         QApplication.instance().applicationStateChanged.connect(lambda _state: self._keep_topmost())
         self._keep_topmost()
 
@@ -263,11 +269,44 @@ class App:
                 keep_on_top(window)
         if self.music.window is not None and self.music.window.isVisible():
             keep_on_top(self.music.window)
-        if active is not None and active.isVisible():
-            owned = active is self.pet or active is self.scene or active in self.windows.values()
-            owned = owned or active is self.music.window
-            if owned:
-                keep_on_top(active, bring_to_front=True)
+
+        # ★ 2026-09-21「点击谁，谁就在最前面」：上面的循环只重申置顶**标志**、不动 Z 序，
+        #   所以 Z 序一直由 self.windows 的字典顺序决定 —— 用户点了想要的那扇窗，下一拍
+        #   又会被排在它后面的窗口盖住（用户反馈「点击想用的，但会被其他页面挡住且无法
+        #   提高其显示顺序优先级」）。这里改为按 common 里的 MRU 次序「最旧 → 最近」依次
+        #   抬层：最后一次 raise 的就是用户最近点过的窗口，于是它压过其它全部卡片。
+        #   bring_to_front 不带 activate —— 不抢焦点，不会打断用户正在输入的内容。
+        cards = self._owned_cards()
+        front = front_widget()
+        if front is None and active is not None and active in cards:
+            # 还没有任何点击记录（例如刚启动）→ 用系统活动窗口兜底，保持原有行为
+            note_front(active, raise_now=False)
+            front = active
+        if front is not None:
+            # 有「最近使用」才抬层：从未点过任何窗口时 Z 序保持原样，不动
+            for w in iter_front_order(cards):
+                keep_on_top(w, bring_to_front=True)
+
+    def _owned_cards(self):
+        """本程序所有「卡片类」顶层窗口（宠物 / 场景 / 常驻挂件 / 各功能页 / 播放器）。"""
+        cards = []
+        if not state.hidden and self.pet.isVisible():
+            cards.append(self.pet)
+        if self.scene is not None and self.scene.isVisible():
+            cards.append(self.scene)
+        dock = getattr(self, "todo_dock", None)
+        if dock is not None and dock.isVisible():
+            cards.append(dock)
+        cards += [w for w in self.windows.values() if w is not None and w.isVisible()]
+        # 便签卡片：注册表挂在待办窗口上（不属于 self.windows），必须显式纳入 ——
+        # 否则用户在便签上点击虽然会被 MRU 记录，但抬层清单里没有它，照样被其它页面挡住。
+        todo_win = self.windows.get("todo")
+        if todo_win is not None:
+            cards += [w for w in getattr(todo_win, "sticky_windows", {}).values()
+                      if w is not None and w.isVisible()]
+        if self.music.window is not None and self.music.window.isVisible():
+            cards.append(self.music.window)
+        return cards
 
     # ---------------- macOS：台前调度豁免（全软件统一兜底）----------------
     def _apply_mac_stage_exemption(self):

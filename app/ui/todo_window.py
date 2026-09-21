@@ -205,10 +205,21 @@ _TAG_PRIO_COLORS = {"低": ("#EDF7EC", "#4C9A54"),
                     "中": ("#FFF7EE", "#EA6A1F"),
                     "高": ("#FDECEC", "#C53D36")}
 # 便签左上角「优先级呼吸灯」的实心圆颜色：低=绿 / 中=橙 / 高=红。
-# 取比标签文字色更亮一档，作为发光圆点更醒目（仍是同一色系，不破坏主题）。
-_PRIO_DOT_COLORS = {"低": "#43C463",
+# ★ 2026-09-21 提高区分度/对比度（用户反馈「tododock/便签页面的优先级显示区分度、
+#   颜色对比度不高」）：原来的 #43C463 / #F97316 / #E5534C 三色亮度接近（绿偏亮、
+#   橙偏亮、红居中），在 12px 的小圆点上、「低 vs 中」「中 vs 高」远看容易混。
+#   现改为色相拉开 + 饱和度拉满的一档主色：绿更正、橙更纯、红更沉，肉眼一眼可分。
+_PRIO_DOT_COLORS = {"低": "#16A34A",
                     "中": "#F97316",
-                    "高": "#E5534C"}
+                    "高": "#DC2626"}
+# 优先级「实心标签」底色（TodoDock 玻璃标签、便签顶部文字 chip 共用）：
+# 把主色再压深一档，使「纯白字 + 饱和底」的对比度 ≥ 4.5:1
+# （白字压在主色 #16A34A / #F97316 上只有 ~2.0 对比度，压深后才有 5:1 左右）。
+_PRIO_TAG_FILL = {"低": "#15803D",
+                  "中": "#B45309",
+                  "高": "#B91C1C"}
+# 兼容旧名（TodoDock 玻璃标签此前引用的是 _PRIO_DOT_COLORS）
+_PRIO_GLASS_FILL = _PRIO_TAG_FILL
 
 
 def priority_tag_colors(prio: str):
@@ -232,14 +243,20 @@ class TagLabel(QLabel):
     屏幕录制权限弹窗，故不采用真·背景模糊）。"""
 
     # 玻璃模式的绘制参数（集中在此，便于统一调参）
-    # 注意：玻璃底色用**优先级主色**（低绿/中橙/高红），不能用标签的浅色底
-    # （#FDECEC 那类浅色半透明后几乎等于白色，在浅色壁纸上完全看不出颜色）。
-    _GLASS_FILL_ALPHA = 95        # 彩色底透明度（≈0.37，既能透出壁纸又保留色相）
-    _GLASS_EDGE_ALPHA = 190       # 描边透明度
-    _GLASS_TOP_LIGHT = 55         # 顶部高光（白）
-    _GLASS_MID_LIGHT = 18         # 中段高光
-    _GLASS_BOTTOM_SHADE = 34      # 底部暗调（玻璃厚度）
-    _GLASS_TEXT_DARKEN = 118      # 文字压深（0-255 全黑为 0）
+    # 注意：玻璃底色用**优先级实底色**（_PRIO_TAG_FILL：低绿/中橙/高红），不能用标签的
+    # 浅色底（#FDECEC 那类浅色半透明后几乎等于白色，在浅色壁纸上完全看不出颜色）。
+    #
+    # ★ 2026-09-21 提高对比度（用户反馈「优先级颜色对比度不高」）：
+    #   旧参数填充 alpha 只有 95（≈0.37）→ 一旦贴在浅色壁纸/浅色桌面图标上，三档颜色
+    #   都被冲淡成「差不多的浅色块」，既分不出档位、白/深字也都不够醒目。
+    #   现把填充提到 225（≈0.88，桌面只透出一点点氛围），描边加深，并用纯白文字—— 
+    #   深绿/深琥珀/深红 三底 + 白字，档位区分与文字对比度同时达标。
+    _GLASS_FILL_ALPHA = 225       # 彩色底不透明度（越接近 255 越"实"，颜色越认得清）
+    _GLASS_EDGE_ALPHA = 235       # 描边透明度
+    _GLASS_TOP_LIGHT = 38         # 顶部高光（白），压低避免把饱和底洗淡
+    _GLASS_MID_LIGHT = 10         # 中段高光
+    _GLASS_BOTTOM_SHADE = 30      # 底部暗调（玻璃厚度）
+    _GLASS_TEXT = (255, 255, 255)  # 玻璃模式文字色：实底上纯白对比度最高
 
     def __init__(self, text="", bg=TAG_BG, fg=TAG_FG, radius=8, glass=False, parent=None):
         super().__init__(text, parent)
@@ -250,6 +267,11 @@ class TagLabel(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setContentsMargins(s(10), s(3), s(10), s(3))
+        if self._glass:
+            # 桌面挂件上的白字小标签：加粗一档，深底白字才不"发虚"
+            f = self.font()
+            f.setBold(True)
+            self.setFont(f)
 
     def set_colors(self, bg, fg):
         self._bg, self._fg = QColor(bg), QColor(fg)
@@ -272,10 +294,11 @@ class TagLabel(QLabel):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(self._bg)
             painter.drawRoundedRect(rect, self._radius, self._radius)
-        # 文字：玻璃模式下压深一档，保证半透明底上的对比度
+        # 文字：玻璃模式改用纯白（填充已接近不透明，白字对比度最高；
+        # 旧的「把文字色压深」在半透明浅底上才有意义，现在的实底上反而会糊）
         text_color = self._fg
         if self._glass:
-            text_color = self._fg.darker(self._GLASS_TEXT_DARKEN)
+            text_color = QColor(*self._GLASS_TEXT)
         painter.setPen(text_color)
         painter.setFont(self.font())
         painter.drawText(self.rect(),
@@ -822,9 +845,9 @@ class TaskRow(QWidget):
         # 数据库里的 priority 值保持「低/中/高」不改，避免破坏既有数据与逻辑。
         prio_bg, prio_fg = priority_tag_colors(prio)
         if self.glass_tag:
-            # 毛玻璃底改用优先级主色（低绿/中橙/高红）：浅色底半透明后等于白色，
-            # 在桌面上完全看不出优先级。
-            prio_bg = _PRIO_DOT_COLORS.get(prio, prio_bg)
+            # 毛玻璃底改用优先级**实底色**（_PRIO_TAG_FILL：低绿/中橙/高红）：
+            # 浅色底（#EDF7EC 那类）半透明后等于白色，在桌面上完全看不出优先级。
+            prio_bg = _PRIO_TAG_FILL.get(prio, prio_bg)
         meta_lay.addWidget(
             self._make_tag(tr(prio), prio_bg, prio_fg, glass=self.glass_tag))
         self.meta.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
@@ -1855,6 +1878,17 @@ class PriorityPulseDot(QWidget):
         r_core = self.width() * (0.27 + 0.06 * t)
         p.setBrush(QBrush(core))
         p.drawEllipse(QRectF(cx - r_core, cy - r_core, r_core * 2, r_core * 2))
+        # ★ 2026-09-21 提高对比度：核心圆外加一圈白色描边环。
+        #   便签底色是可切换的多色（含米色/浅黄/深色），纯色圆点贴在浅色底上边界会糊，
+        #   加白环后无论卡片什么底色都有一道明确的轮廓，档位颜色也更容易辨。
+        #   坑（实测，见 TagLabel._paint_glass 注释）：描边只能用「透明 QColor 画刷 +
+        #   浮点线宽 + 显式 PenStyle」，不能用 setBrush(Qt.BrushStyle.NoBrush)，那套在本
+        #   项目的 Qt 组合下会静默崩进程。
+        lw = max(1.0, self.width() * 0.09)
+        p.setBrush(QColor(0, 0, 0, 0))
+        p.setPen(QPen(QColor(255, 255, 255, 240), lw, Qt.PenStyle.SolidLine))
+        r_ring = r_core + lw * 0.75
+        p.drawEllipse(QRectF(cx - r_ring, cy - r_ring, r_ring * 2, r_ring * 2))
 
 
 class StickyNoteWindow(QWidget):
@@ -1943,9 +1977,18 @@ class StickyNoteWindow(QWidget):
         # ★ 左上角优先级呼吸灯（低=绿 / 中=橙 / 高=红）：插在 stretch 之前 → 位于顶部栏
         #   最左侧；三个操作按钮仍被 addStretch 顶在右侧，其余布局零改动。
         #   圆点自身 WA_TransparentForMouseEvents，所以顶部栏整条仍可按下拖动。
-        self.dot = PriorityPulseDot(self._prio)
+        self.dot = PriorityPulseDot(self._prio, diameter=s(14))
         self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
         bl.addWidget(self.dot)
+        # ★ 2026-09-21 补「优先级文字 chip」（用户反馈「便签页面优先级区分度不高」）：
+        #   便签原来只用一枚 12px 的小圆点表示优先级，低/中/高三色在浅色卡片上很难区分，
+        #   不悬停看 tooltip 甚至不知道是哪一档。这里补一个同色系实底 + 白字的文字标签，
+        #   「低 / 中 / 高」直接写出来，一眼可辨；高度压到 20 以内以适配 24px 的顶部栏。
+        self.prio_tag = TagLabel(tr(self._prio), _PRIO_TAG_FILL.get(self._prio, TAG_BG),
+                                 "#FFFFFF", radius=6)
+        self.prio_tag.setFixedHeight(s(20))
+        self.prio_tag.setToolTip(tr("优先级") + "：" + tr(self._prio))
+        bl.addWidget(self.prio_tag)
         bl.addStretch(1)
         bl.addWidget(self.btn_complete)
         bl.addWidget(self.btn_pin)
@@ -2111,6 +2154,15 @@ class StickyNoteWindow(QWidget):
             return
         self.sync_state()
 
+    def _refresh_prio_tag(self):
+        """刷新便签顶部栏的「优先级文字 chip」：文案跟随语言、底色跟随档位。"""
+        tag = getattr(self, "prio_tag", None)
+        if tag is None:
+            return
+        tag.setText(tr(self._prio))
+        tag.set_colors(_PRIO_TAG_FILL.get(self._prio, TAG_BG), "#FFFFFF")
+        tag.setToolTip(tr("优先级") + "：" + tr(self._prio))
+
     def preview_priority(self, prio):
         """编辑页实时预览：仅刷新左上角呼吸灯颜色与提示语，不改动其它状态。
         定稿由 sync_state 完成——保存后按新值、返回/取消后按存储旧值回退。"""
@@ -2118,6 +2170,7 @@ class StickyNoteWindow(QWidget):
         if getattr(self, "dot", None) is not None:
             self.dot.set_priority(self._prio)
             self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
+        self._refresh_prio_tag()
 
     def sync_state(self):
         """根据任务最新 done 状态刷新：标题删除线+颜色、确认键图标、优先级呼吸灯。"""
@@ -2128,6 +2181,7 @@ class StickyNoteWindow(QWidget):
         if getattr(self, "dot", None) is not None:
             self.dot.set_priority(self._prio)
             self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
+        self._refresh_prio_tag()
         f = self.title.font()
         f.setStrikeOut(self._done)
         self.title.setFont(f)
@@ -2140,6 +2194,7 @@ class StickyNoteWindow(QWidget):
         self.title.setPlaceholderText(tr("任务标题"))
         if getattr(self, "dot", None) is not None:
             self.dot.setToolTip(tr("优先级") + "：" + tr(self._prio))
+        self._refresh_prio_tag()
         editor = getattr(self, "editor", None)
         if editor is not None and hasattr(editor, "retranslate"):
             editor.retranslate()

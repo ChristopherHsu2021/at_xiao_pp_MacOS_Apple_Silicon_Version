@@ -3,7 +3,7 @@
 所有工具窗口（待办/闹钟/计时/设置/场景）继承此基类，保证视觉风格统一。
 """
 
-from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, pyqtSignal, QTimer, QObject, QEvent
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QGraphicsDropShadowEffect, QApplication, QTextEdit, QLineEdit, QComboBox,
@@ -141,6 +141,104 @@ def promote_popup_topmost():
 def promote_popup_soon():
     """在弹出窗口真正显示之后再提权（showPopup 内同步调用时窗口尚未创建）。"""
     QTimer.singleShot(0, promote_popup_topmost)
+
+
+# ==================== 卡片窗口「点击即抬到最前」（MRU 次序） ====================
+# 需求（2026-09-21）：用户点击想用的页面，却总被其它卡片挡住，且无法把想要的页面提到
+# 前面。根因不在「点击没生效」，而在 **Z 序由代码决定、与用户操作无关**：
+#   App._keep_topmost 每 1.5s 会把所有卡片窗口依次 raise 一遍，谁最后被 raise 取决于
+#   self.windows 字典的插入顺序 —— 用户刚点到前面的窗口，下一拍就被排在它后面的窗口
+#   重新盖住。唯一按 QApplication.activeWindow() 抬层的那一路，对本程序的无边框、
+#   非激活浮窗（WA_ShowWithoutActivating + WindowStaysOnTopHint）在 macOS 上并不可靠。
+# 修法：维护一个「最近使用」栈（MRU）。鼠标按在哪扇顶层窗口上，就把它移到栈尾（最后），
+#   _keep_topmost 改为按 MRU 次序「最旧 → 最近」依次抬层 —— 最后抬的那扇就在最前，
+#   于是「点谁，谁就压过其它卡片」。纯用户意图驱动，不改变「切到别的 App 就让路」语义。
+_front_stack = []
+_FRONT_STACK_MAX = 8
+
+
+def note_front(widget, raise_now=True):
+    """把 widget 记为「用户最近操作的顶层窗口」，并（默认）立刻抬到本程序最前。"""
+    try:
+        if widget is None:
+            return
+        w = widget.window() if hasattr(widget, "window") else widget
+        if w is None:
+            return
+        if w in _front_stack:
+            _front_stack.remove(w)
+        _front_stack.append(w)
+        # 只保留最近 8 扇（长跑下栈不会无限增长；del [:−8] 在不足 8 项时本就是空切片）
+        del _front_stack[:-_FRONT_STACK_MAX]
+        if raise_now:
+            keep_on_top(w, bring_to_front=True)
+    except RuntimeError:
+        return
+
+
+def front_widget():
+    """返回「用户最近操作的顶层窗口」；顺带剔除已销毁的栈顶条目。"""
+    while _front_stack:
+        w = _front_stack[-1]
+        try:
+            if w.isVisible():
+                return w
+        except RuntimeError:
+            pass
+        _front_stack.pop()
+    return None
+
+
+def iter_front_order(items):
+    """把 items 按 MRU 次序重排：**最旧在前、最近使用在后**。
+
+    _keep_topmost 按此顺序 raise，最后抬的就是用户最近点的那个窗口 → 它压在最上面。
+    从未记录过的窗口排在最前（key=-1），保持原有相对次序不变。
+    """
+    order = {id(w): i for i, w in enumerate(_front_stack)}
+    return sorted(items, key=lambda w: order.get(id(w), -1))
+
+
+class FrontTracker(QObject):
+    """全局事件过滤器：鼠标按在哪扇顶层窗口上，就把它记为最近使用并立刻抬层。
+
+    只处理 MouseButtonPress —— 正好对应「点窗口任意位置表示我要用这扇窗」这一最直接
+    意图，不干预其它事件，也不影响各窗口自己的拖拽 / 点击逻辑。
+    瞬时浮层（下拉面板 / 右键菜单 / tooltip）不算「卡片页面」，一律跳过。
+    """
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        # ★ 虚函数体内绝不能让异常逃逸：PyQt6 会直接 qFatal() → 整个 App abort
+        if event.type() == QEvent.Type.MouseButtonPress:
+            guard_ui("点击抬层", self._note, obj)
+        return False
+
+    @staticmethod
+    def _note(obj):
+        if not isinstance(obj, QWidget):
+            return
+        w = obj.window()
+        if w is None or not w.isVisible():
+            return
+        wtype = int(w.windowType()) & 0xFF
+        # 排除瞬时浮层（Popup / ToolTip / SplashScreen）：它们不是"卡片页面"
+        if wtype in (int(Qt.WindowType.Popup), int(Qt.WindowType.ToolTip),
+                     int(Qt.WindowType.SplashScreen)):
+            return
+        note_front(w)
+
+
+_front_tracker = None
+
+
+def install_front_tracker(app):
+    """安装「点击抬层」全局过滤器（幂等：重复调用只装一次）。"""
+    global _front_tracker
+    if _front_tracker is not None:
+        return _front_tracker
+    _front_tracker = FrontTracker(app)
+    app.installEventFilter(_front_tracker)
+    return _front_tracker
 
 
 def release_topmost(widget):
@@ -739,6 +837,17 @@ DROPDOWN_ITEM_SEL_QSS = scale_qss(
     "padding:0 12px;font-size:13px;color:#f97510;font-weight:600;}"
     "QPushButton#dropItem:hover{background:rgba(249,117,16,0.18);color:#f97510;}"
 )
+# ★ 2026-09-21 修「重复下拉框背景透明、透出下面的歌曲列表」（用户截图）：
+#   面板卡片此前直接复用 CTX_MENU_CARD_QSS，但它的选择器是 ``QWidget#ctxMenuCard``，
+#   而这里 card 的 objectName 是 ``dropdownCard`` —— **选择器不匹配 → 一条声明都没落上**，
+#   卡片等于完全没背景；面板是 WA_TranslucentBackground 的顶层 popup，于是整块透到下层。
+#   现改为专属 QSS：不透明主题底 #fffaf5（与各页面卡片 GLASS_STYLE 同色）+ 主题色描边 + 圆角。
+#   注意：QSS 必须带 objectName 选择器，且与 setObjectName() 完全一致（同文件的 ctxMenuCard
+#   就是这么用的）——这是本项目里最容易复现的「样式写了但没生效」坑。
+DROPDOWN_CARD_QSS = scale_qss(
+    "QWidget#dropdownCard{background:#fffaf5;border:1px solid #f2d9bd;"
+    "border-radius:10px;}"
+)
 
 
 class _DropdownPanel(QWidget):
@@ -765,7 +874,8 @@ class _DropdownPanel(QWidget):
         card = QWidget(self)
         card.setObjectName("dropdownCard")
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        card.setStyleSheet(CTX_MENU_CARD_QSS)        # 白底 / 圆角 8px / 细边框
+        # ★ 必须用与 objectName 匹配的专属 QSS（曾经误用 ctxMenuCard 的选择器 → 背景全丢）
+        card.setStyleSheet(DROPDOWN_CARD_QSS)
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(s(16))
         shadow.setOffset(0, s(4))
