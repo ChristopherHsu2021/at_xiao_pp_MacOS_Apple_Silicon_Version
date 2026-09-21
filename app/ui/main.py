@@ -288,15 +288,19 @@ class App:
                 keep_on_top(w, bring_to_front=True)
 
     def _owned_cards(self):
-        """本程序所有「卡片类」顶层窗口（宠物 / 场景 / 常驻挂件 / 各功能页 / 播放器）。"""
+        """本程序所有「卡片类」顶层窗口（宠物 / 场景 / 各功能页 / 便签 / 播放器）。
+
+        ★ TodoDock 刻意不在此列：它自行管理动态层级（光标进入→浮层、离开→普通层
+        + orderBack）以做到「不遮挡其它 App」。若被本机制的 keep_on_top 强制置顶，会
+        补 WindowStaysOnTopHint、重建原生窗口、丢失台前调度豁免 → App 失活时挂件被
+        系统隐藏（闪现即消失）。它的显示/层级由自身 40ms 轮询与 _apply_mac_outer_style
+        负责，请勿在此抬层（FrontTracker 也通过 _manages_own_level 跳过它）。
+        """
         cards = []
         if not state.hidden and self.pet.isVisible():
             cards.append(self.pet)
         if self.scene is not None and self.scene.isVisible():
             cards.append(self.scene)
-        dock = getattr(self, "todo_dock", None)
-        if dock is not None and dock.isVisible():
-            cards.append(dock)
         cards += [w for w in self.windows.values() if w is not None and w.isVisible()]
         # 便签卡片：注册表挂在待办窗口上（不属于 self.windows），必须显式纳入 ——
         # 否则用户在便签上点击虽然会被 MRU 记录，但抬层清单里没有它，照样被其它页面挡住。

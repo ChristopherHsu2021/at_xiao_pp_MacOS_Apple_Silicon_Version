@@ -1879,11 +1879,11 @@ class LyricOverlayWindow(QDialog):
         controls.setContentsMargins(s(0), s(0), s(0), s(0))
         controls.setSpacing(s(0))
         controls.addStretch(1)
-        # ★ 2026-09-21 用户意见（两轮）：先「功能键稍微大一点」（图标 30→34、文字键
-        #   48×26→54×32），现要求「整排按钮统一大小、与播放键对齐、必须完整显示」——
-        #   故 9 个按钮全部取 34×34（与播放键同尺寸），文字键字号随窗口缩放等比缩小
-        #   （见 _apply_scale），保证「A+ / L-」等文字不被裁切；承载槽 64×34（槽高必须
-        #   ≥ 按钮边长，否则固定尺寸按钮会被裁边）。
+        # ★ 2026-09-21 用户意见（三轮）：先「功能键稍微大一点」（图标 30→34、文字键
+        #   48×26→54×32），再要求「整排统一 34×34、与播放键对齐、完整显示」，本轮进一步
+        #   要求「A+/A-/L+/L- 与歌词调色盘再大一点」——故图标键保持 34×34、文字键放大到
+        #   40×40（见 _apply_scale），文字键字号随窗口缩放等比缩小（上限提高）保证不被裁切；
+        #   调色盘色块 18→24；承载槽 52×40（槽高必须 ≥ 文字键边长，否则固定尺寸按钮被裁边）。
         self.loop_b = IconButton("loop", 34)
         self.prev_b = IconButton("prev", 34)
         self.play_b = IconButton("play", 34)
@@ -1943,11 +1943,12 @@ QPushButton#toolBtn:hover { color: #ff9a3d; }
         palette_row.addStretch(1)
         for color in ("#f97510", "#4d96ff", "#ff5f8f", "#7bd88f", "#b990ff"):
             swatch = QPushButton()
-            swatch.setFixedSize(s(18), s(18))
+            # ★ 用户要求「歌词调色盘再大一点」：色块 18→24（更易于点按）
+            swatch.setFixedSize(s(24), s(24))
             swatch.setCursor(Qt.CursorShape.PointingHandCursor)
             swatch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             swatch.setStyleSheet(scale_qss(f"""
-QPushButton {{ background: {color}; border: 1px solid rgba(255,255,255,0.72); border-radius: 9px; }}
+QPushButton {{ background: {color}; border: 1px solid rgba(255,255,255,0.72); border-radius: 12px; }}
 QPushButton:hover {{ border: 2px solid #ffffff; }}
 """))
             swatch.clicked.connect(lambda checked=False, c=color: self._set_color(c))
@@ -1976,36 +1977,39 @@ QPushButton:hover {{ border: 2px solid #ffffff; }}
     def _apply_scale(self):
         s = self._scale
         self.setFixedSize(int(self.BASE_W * s), int(self.BASE_H * s))
-        # 槽宽 / 槽高同步放大（48×34）：9 个槽 × 48 = 432 < BASE_W(730)，按钮 34 居中、不会被裁。
-        slot_w = int(48 * s)
+        # 槽宽 / 槽高同步放大（图标键 34、文字键 40 → 槽取 52×40 包住两者）：
+        # 9 个槽 × 52 = 468 < BASE_W(730)，按钮居中、不会被裁。
+        slot_w = int(52 * s)
         for slot in self._control_slots:
             slot.setFixedWidth(slot_w)
-            slot.setFixedHeight(int(34 * s))
-        # ★ 整排按钮统一 34×34（与播放键同尺寸）：图标键与文字键走同一 side，视觉一致。
-        side = int(34 * s)
+            slot.setFixedHeight(int(40 * s))
+        # ★ 图标键保持 34×34（与播放键同尺寸）；文字键 A+/A-/L+/L- 按用户要求
+        #   放大到 40×40（上一轮已把整排统一成 34，本轮「再大一点」只放大文字键 +
+        #   调色盘，图标键维持不变）。字号随窗口缩放等比（上限提高），保证文字不被裁切。
+        side_icon = int(34 * s)
+        side_text = int(40 * s)
         for b in self._icon_buttons:
-            b.setFixedSize(side, side)
+            b.setFixedSize(side_icon, side_icon)
             # 图标按设计稿 30px 基准绘制，这里显式把缩放系数对齐到「按钮实际边长 / 30」，
             # 使图标与按钮同尺度（否则按钮变大而图标不变，看起来图标反而变小了）。
-            b._glyph_scale = side / 30.0
+            b._glyph_scale = side_icon / 30.0
         for b in self._font_buttons:
-            # 文字键同样 34×34 方形；字号随窗口缩放等比缩小（≤ side 的一半），
-            # 保证「A+ / A- / L+ / L-」在任意缩放下都完整显示、不被裁切。
-            b.setFixedSize(side, side)
+            b.setFixedSize(side_text, side_text)
             b.setStyleSheet(scale_qss(f"""
 QPushButton#toolBtn {{
     background: transparent;
     border: none;
     color: #f97510;
     font-family: {UI_FONT_STACK};
-    font-size: {max(12, int(side * 0.5))}px;
+    font-size: {max(14, int(side_text * 0.5))}px;
     font-weight: 800;
     padding: 0;
 }}
 QPushButton#toolBtn:hover {{ color: #ff9a3d; }}
 """))
         for swatch in self._swatches:
-            swatch.setFixedSize(int(18 * s), int(18 * s))
+            # 调色盘色块与 _build 里初始尺寸保持一致：18 → 24（用户要求再大一点）
+            swatch.setFixedSize(int(24 * s), int(24 * s))
         self.lyric.setMinimumSize(int(560 * s), int(46 * s))
         self.lyric.set_font_size(int(25 * s))
         self._dock_bottom_center()

@@ -28,7 +28,7 @@ from app.core.i18n import tr
 from app.core.todo_signals import bus
 from app.ui.common import (
     PeekCard, NoticeDialog, promote_popup_topmost,
-    EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui,
+    EditContextMenu, CTX_MENU_TEXT_QSS, guard_ui, note_front,
 )
 from app.ui.screen_fit import fit_window, scale_qss, s, WINDOW_DEFAULTS
 from app.ui.style import (
@@ -1649,6 +1649,8 @@ class TodoWindow(QDialog):
         """
         existing = self.sticky_windows.get(task["id"])
         if existing is not None:
+            # 重新聚焦已开的便签：记为最近使用并抬到最前，避免被其它卡片盖住
+            note_front(existing, raise_now=True)
             existing.raise_()
             existing.activateWindow()
             return
@@ -2068,6 +2070,11 @@ class StickyNoteWindow(QWidget):
         super().showEvent(e)
         # macOS：便签卡片同样必须免除台前调度管理（否则切 App 时便签会被收进左侧缩略图条）
         apply_stage_exempt(self, tag="StickyNoteWindow")
+        # ★ 打开便签即记为「最近使用」并立刻抬到最前：从任务清单页点标题开便签时，
+        #   点击事件记的是任务清单窗口（而非便签本身），若不在此补一步，下一拍 1.5s
+        #   置顶定时器会按 MRU 把任务清单抬到便签之上 → 便签「闪一下就被盖住、像消失」。
+        #   便签自带 WindowStaysOnTopHint，keep_on_top 不会重建原生窗口、安全。
+        note_front(self, raise_now=True)
         # 初次显示时布局尚未稳定，self.note 的最小尺寸会偏高（~404）把卡片顶出窗口、
         # 裁掉底部工具栏；待布局稳定后重新同步几何，让卡片恰好铺满窗口、不被裁剪。
         QApplication.processEvents()

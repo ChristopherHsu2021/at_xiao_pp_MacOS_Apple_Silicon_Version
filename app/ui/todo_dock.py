@@ -185,6 +185,10 @@ class TodoDock(QWidget):
         self._hover_row = None      # 当前光标命中的行（用于自绘 hover 高亮）
         self._tip = None            # 自绘 hover 提示卡（首次需要时才建）
         self._floating = None       # 当前是否处于浮层（None = 尚未设置，见 _ensure_level）
+        # ★ 标记「自行管理层级」：全局 FrontTracker / _keep_topmost 看到它就跳过
+        # （不调用 keep_on_top，否则会补 WindowStaysOnTopHint、重建原生窗口、丢失
+        # 台前调度豁免 → 挂件闪现即消失）。层级由本类的 40ms 轮询 + _apply_mac_outer_style 负责。
+        self._manages_own_level = True
         # 仅无边框；不设置 WindowStaysOnTopHint —— 不强制置顶，点击其它软件时本窗口
         # 不会被隐藏，只是层级上可被其它窗口覆盖（满足「必须显示 + 其它软件可更高」）。
         # macOS 额外加 Qt.Tool（→ NSPanel 浮层面板）：普通 NSWindow 会被台前调度

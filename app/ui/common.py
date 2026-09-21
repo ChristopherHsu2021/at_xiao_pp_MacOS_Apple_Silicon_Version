@@ -225,6 +225,13 @@ class FrontTracker(QObject):
         if wtype in (int(Qt.WindowType.Popup), int(Qt.WindowType.ToolTip),
                      int(Qt.WindowType.SplashScreen)):
             return
+        # 跳过「自行管理层级」的窗口（如桌面 TodoDock）：它有动态层级（光标进入→浮层、
+        # 离开→普通层 + orderBack）来做到「不遮挡其它 App」。本机制若对它调用
+        # keep_on_top 会补 WindowStaysOnTopHint → **重建原生 NSWindow** → 丢失挂件专属的
+        # 台前调度豁免（collectionBehavior / hidesOnDeactivate=NO），App 失活时 NSPanel
+        # 默认隐藏 → 挂件「闪现即消失」。故这类窗口绝不能被本抬层机制碰（详见 mac_window）。
+        if getattr(w, "_manages_own_level", False):
+            return
         note_front(w)
 
 
