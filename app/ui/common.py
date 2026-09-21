@@ -833,6 +833,21 @@ class StyledComboBox(QComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._panel = None
+        # 非编辑态：去掉原生聚焦边框，点击行为完全由下面的 mousePressEvent 接管。
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def mousePressEvent(self, event):  # noqa: N802
+        # ★ 显式接管左键点击：直接 showPopup()，**不依赖 Qt 的 style 子控件命中测试**。
+        #   实测在 macOS（Apple Silicon）上，QComboBox 默认 mousePressEvent 走
+        #   style()->hitTestComplexControl 判断点击是否落在「按钮」子控件，自定义外观 /
+        #   WA_TranslucentBackground 浮窗下该命中区常常判空 → 点击不触发 showPopup →
+        #   用户看到的就是「重复下拉框点不了、毫无反应」。这里无论如何都开弹层，
+        #   行为确定，与平台 style 无关。
+        if event.button() == Qt.MouseButton.LeftButton and self.count() > 0:
+            self.showPopup()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
     def showPopup(self):  # noqa: N802
         # ★ showPopup / hidePopup 都是 **Qt 虚函数**（Qt 在 mousePressEvent 等内部直接
@@ -848,20 +863,29 @@ class StyledComboBox(QComboBox):
         if self._panel is not None or self.count() == 0:
             return
         items = [self.itemText(i) for i in range(self.count())]
-        panel = _DropdownPanel(self, items, self.currentIndex())
-        panel.adjustSize()
+        try:
+            panel = _DropdownPanel(self, items, self.currentIndex())
+            panel.adjustSize()
+        except Exception as exc:  # noqa: BLE001
+            # 面板本身构不出来（极少见）：绝不冒泡到 Qt 虚函数，否则会 qFatal 整程序退出。
+            mac_log(f"下拉面板构造失败：{exc!r}", tag="dropdown")
+            return
 
         below = self.mapToGlobal(QPoint(0, self.height() + s(4)))
         x, y = below.x(), below.y()
-        screen = QApplication.screenAt(below) or QApplication.primaryScreen()
-        if screen is not None:
-            avail = screen.availableGeometry()
-            if y + panel.height() > avail.bottom():      # 下方放不下 → 上翻
-                y = self.mapToGlobal(QPoint(0, -panel.height() - s(4))).y()
-            y = max(avail.top(), min(y, avail.bottom() - panel.height()))
-            x = max(avail.left(), min(x, avail.right() - panel.width()))
-        panel.move(x, y)
+        try:
+            screen = QApplication.screenAt(below) or QApplication.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+                if y + panel.height() > avail.bottom():      # 下方放不下 → 上翻
+                    y = self.mapToGlobal(QPoint(0, -panel.height() - s(4))).y()
+                y = max(avail.top(), min(y, avail.bottom() - panel.height()))
+                x = max(avail.left(), min(x, avail.right() - panel.width()))
+        except Exception:  # noqa: BLE001
+            # 屏幕几何算不出来就用原始全局坐标，至少能弹出来
+            x, y = below.x(), below.y()
 
+        panel.move(x, y)
         self._panel = panel
         try:
             # 先登记引用再 show：面板一旦可见，popup_open() 的兜底探测立即生效，
